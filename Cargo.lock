@@ -420,6 +420,7 @@ dependencies = [
  "itertools",
  "lox-zkp",
  "nimue",
+ "rand",
  "rand_core",
  "rkvc-derive",
  "subtle",

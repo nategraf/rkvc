@@ -97,4 +97,51 @@ impl<Msg: Attributes<RistrettoScalar>> PedersonCommitment<RistrettoPoint, Msg> {
 }
 
 #[cfg(test)]
-mod test {}
+mod test {
+    use curve25519_dalek::{RistrettoPoint, Scalar};
+    use rkvc_derive::Attributes;
+
+    use super::{PedersonCommitment, PedersonCommitmentError};
+
+    #[derive(Attributes)]
+    #[rkvc(field = curve25519_dalek::Scalar)]
+    struct Example {
+        a: u64,
+        b: Scalar,
+    }
+
+    #[test]
+    fn basic_success() {
+        let example = Example {
+            a: 42,
+            b: Scalar::from(5u64),
+        };
+        let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
+            &mut rand::thread_rng(),
+            &example,
+        );
+        commit.open(&example, blind).unwrap();
+    }
+
+    #[test]
+    fn basic_fail() {
+        let example = Example {
+            a: 42,
+            b: Scalar::from(5u64),
+        };
+        let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
+            &mut rand::thread_rng(),
+            &example,
+        );
+        commit.open(&example, blind).unwrap();
+
+        let mangled_example = Example {
+            a: 42,
+            b: Scalar::from(6u64),
+        };
+        let Err(PedersonCommitmentError::VerificationError) = commit.open(&mangled_example, blind)
+        else {
+            panic!("open did not fail with verification error");
+        };
+    }
+}

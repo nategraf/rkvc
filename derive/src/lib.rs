@@ -58,6 +58,7 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
 
     let field_names: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
 
+    // TODO: Add a #[label = "foo"] attribute that can be used to specify this manually.
     let indices: Vec<_> = (0..field_names.len()).collect();
     let field_labels: Vec<_> = field_names
         .iter()

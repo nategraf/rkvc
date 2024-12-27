@@ -30,3 +30,4 @@ zeroize = { version = "1.8.1", default-features = false }
 [dev-dependencies]
 itertools = "0.13.0"
 rkvc-derive = { path = "./derive" }
+rand = "0.8"
