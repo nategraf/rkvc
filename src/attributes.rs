@@ -30,49 +30,15 @@ pub trait Attributes<F: Field> {
 
 #[cfg(test)]
 mod test {
-    use curve25519_dalek::Scalar;
+    use rkvc_derive::Attributes;
 
     use super::{AttributeElems, AttributeLabels, Attributes};
 
+    #[derive(Attributes)]
+    #[rkvc(field = curve25519_dalek::Scalar)]
     struct Example {
         foo: u64,
         bar: u64,
-    }
-
-    struct ExampleLabels;
-
-    impl AttributeLabels for ExampleLabels {
-        fn at(&self, i: usize) -> Option<&'static str> {
-            match i {
-                0 => Some("foo"),
-                1 => Some("bar"),
-                _ => None,
-            }
-        }
-    }
-
-    struct ExampleElems<'a>(&'a Example);
-
-    impl AttributeElems<Scalar> for ExampleElems<'_> {
-        fn at(&self, i: usize) -> Option<Scalar> {
-            match i {
-                0 => Some(Scalar::from(self.0.foo)),
-                1 => Some(Scalar::from(self.0.bar)),
-                _ => None,
-            }
-        }
-    }
-
-    impl Attributes<Scalar> for Example {
-        type Labels = ExampleLabels;
-
-        fn attribute_labels() -> Self::Labels {
-            ExampleLabels
-        }
-
-        fn attribute_elems(&self) -> impl AttributeElems<Scalar> {
-            ExampleElems(self)
-        }
     }
 
     #[test]

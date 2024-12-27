@@ -1,7 +1,17 @@
-[package]
-name = "rkvc"
+[workspace]
+members = [
+  ".",
+  "derive",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
+
+[package]
+name = "rkvc"
+version = { workspace = true }
+edition = { workspace = true }
 
 [dependencies]
 blake2 = { version = "0.10.6", default-features = false }
@@ -11,9 +21,12 @@ ff = { version = "0.13.0", default-features = false, features = ["bits", "derive
 group = { version = "0.13.0", default-features = false, features = ["rand"] }
 lox-zkp = "0.8.1"
 nimue = { version = "0.1.1", default-features = false, features = ["group"] }
-rand_core = { version = "0.6.4", default-features = false }
+rand_core = { version = "0.6", default-features = false }
+subtle = { version = "2.6", default-features = false }
+thiserror = { version = "2.0.9", default-features = false }
 typenum = { version = "1.17.0", features = ["no_std"] }
 zeroize = { version = "1.8.1", default-features = false }
 
 [dev-dependencies]
 itertools = "0.13.0"
+rkvc-derive = { path = "./derive" }
