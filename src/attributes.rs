@@ -1,19 +1,19 @@
 use ff::Field;
 
 // TODO: Combine these into one traits that returns (label, f) at each index?
-pub trait AttributeLabels {
+pub trait AttributeLabels: Sized {
     fn at(&self, i: usize) -> Option<&'static str>;
 
-    fn iter(&self) -> impl Iterator<Item = &'static str> {
-        (0..).map_while(|i| self.at(i))
+    fn into_iter(self) -> impl Iterator<Item = &'static str> {
+        (0..).map_while(move |i| self.at(i))
     }
 }
 
-pub trait AttributeElems<F: Field> {
+pub trait AttributeElems<F: Field>: Sized {
     fn at(&self, i: usize) -> Option<F>;
 
-    fn iter(&self) -> impl Iterator<Item = F> {
-        (0..).map_while(|i| self.at(i)).fuse()
+    fn into_iter(self) -> impl Iterator<Item = F> {
+        (0..).map_while(move |i| self.at(i)).fuse()
     }
 }
 
@@ -24,7 +24,7 @@ pub trait Attributes<F: Field> {
     type Labels: AttributeLabels;
     //type Elems: AttributeElems<F>;
 
-    fn attribute_labels(&self) -> Self::Labels;
+    fn attribute_labels() -> Self::Labels;
     fn attribute_elems(&self) -> impl AttributeElems<F>;
 }
 
@@ -66,7 +66,7 @@ mod test {
     impl Attributes<Scalar> for Example {
         type Labels = ExampleLabels;
 
-        fn attribute_labels(&self) -> Self::Labels {
+        fn attribute_labels() -> Self::Labels {
             ExampleLabels
         }
 
@@ -79,8 +79,8 @@ mod test {
     fn zip_example() {
         let example = Example { foo: 5, bar: 7 };
         for (label, x) in itertools::zip_eq(
-            example.attribute_labels().iter(),
-            example.attribute_elems().iter(),
+            Example::attribute_labels().into_iter(),
+            example.attribute_elems().into_iter(),
         ) {
             println!("{label}: {x:?}");
         }

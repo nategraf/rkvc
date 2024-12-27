@@ -384,6 +384,7 @@ dependencies = [
  "lox-zkp",
  "nimue",
  "rand_core",
+ "typenum",
  "zeroize",
 ]
 

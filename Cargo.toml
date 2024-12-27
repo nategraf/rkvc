@@ -12,6 +12,7 @@ group = { version = "0.13.0", default-features = false, features = ["rand"] }
 lox-zkp = "0.8.1"
 nimue = { version = "0.1.1", default-features = false, features = ["group"] }
 rand_core = { version = "0.6.4", default-features = false }
+typenum = { version = "1.17.0", features = ["no_std"] }
 zeroize = { version = "1.8.1", default-features = false }
 
 [dev-dependencies]
