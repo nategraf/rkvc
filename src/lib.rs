@@ -1,6 +1,7 @@
 pub mod attributes;
 pub use attributes::{AttributeElems, AttributeLabels, Attributes};
 
+pub mod hash;
 pub mod pederson;
 
 use rand_core::CryptoRng;

@@ -3,13 +3,15 @@ use core::{iter::Sum, marker::PhantomData};
 use blake2::Blake2b512;
 
 use curve25519_dalek::{scalar::Scalar as RistrettoScalar, RistrettoPoint};
-use digest::Digest;
 use group::Group;
 use rand_core::CryptoRngCore;
 use subtle::ConstantTimeEq;
 use typenum::U64;
 
-use crate::attributes::{AttributeElems, AttributeLabels, Attributes};
+use crate::{
+    attributes::{AttributeElems, AttributeLabels, Attributes},
+    hash::FromHash,
+};
 
 #[derive(Clone, Debug)]
 pub struct PedersonCommitment<G: Group, Msg> {
@@ -17,34 +19,11 @@ pub struct PedersonCommitment<G: Group, Msg> {
     _phantom_msg: PhantomData<Msg>,
 }
 
-pub trait FromHash: Sized {
-    type OutputSize;
-
-    // NOTE: Default type bound on D is required only because its required on
-    // RistrettoPoint::from_hash.
-    fn from_hash<D>(hash: D) -> Self
-    where
-        D: Digest<OutputSize = Self::OutputSize> + Default;
-
-    fn hash_from_bytes<D>(input: &[u8]) -> Self
-    where
-        D: Digest<OutputSize = Self::OutputSize> + Default,
-    {
-        let mut hash = D::default();
-        hash.update(input);
-        Self::from_hash(hash)
-    }
-}
-
-impl FromHash for RistrettoPoint {
-    type OutputSize = U64;
-
-    fn from_hash<D>(hash: D) -> Self
-    where
-        D: Digest<OutputSize = Self::OutputSize> + Default,
-    {
-        Self::from_hash(hash)
-    }
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum PedersonCommitmentError {
+    #[error("verification failed")]
+    VerificationError,
 }
 
 impl<G: Group + FromHash<OutputSize = U64>, Msg: Attributes<G::Scalar>> PedersonCommitment<G, Msg> {
@@ -58,13 +37,6 @@ impl<G: Group + FromHash<OutputSize = U64>, Msg: Attributes<G::Scalar>> Pederson
             .into_iter()
             .map(|label| G::hash_from_bytes::<Blake2b512>(label.as_bytes()))
     }
-}
-
-#[non_exhaustive]
-#[derive(Debug, thiserror::Error)]
-pub enum PedersonCommitmentError {
-    #[error("verification failed")]
-    VerificationError,
 }
 
 impl<Msg: Attributes<RistrettoScalar>> PedersonCommitment<RistrettoPoint, Msg> {
