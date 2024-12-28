@@ -15,7 +15,7 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub struct PedersonCommitment<G: Group, Msg> {
-    elem: G,
+    pub elem: G,
     _phantom_msg: PhantomData<Msg>,
 }
 
@@ -26,6 +26,7 @@ pub enum PedersonCommitmentError {
     VerificationError,
 }
 
+// TODO: Make a way to precalculate the generators, including compressed versions.
 impl<G: Group + FromHash<OutputSize = U64>, Msg: Attributes<G::Scalar>> PedersonCommitment<G, Msg> {
     pub fn blind_generator() -> G {
         // TODO: Make this configurable?
