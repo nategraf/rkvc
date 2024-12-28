@@ -30,4 +30,8 @@ zeroize = { version = "1.8.1", default-features = false }
 
 [dev-dependencies]
 rand = "0.8"
+rkvc = { path = ".", features = ["std"] }
 rkvc-derive = { path = "./derive" }
+
+[features]
+std = []

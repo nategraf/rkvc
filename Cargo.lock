@@ -422,6 +422,7 @@ dependencies = [
  "nimue",
  "rand",
  "rand_core",
+ "rkvc",
  "rkvc-derive",
  "subtle",
  "thiserror",
