@@ -13,7 +13,7 @@ pub trait AttributeElems<F: Field>: Sized {
     fn at(&self, i: usize) -> Option<F>;
 
     fn into_iter(self) -> impl Iterator<Item = F> {
-        (0..).map_while(move |i| self.at(i)).fuse()
+        (0..).map_while(move |i| self.at(i))
     }
 }
 

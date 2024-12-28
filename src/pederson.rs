@@ -1,8 +1,8 @@
-use core::marker::PhantomData;
+use core::{iter::Sum, marker::PhantomData};
 
 use blake2::Blake2b512;
 
-use curve25519_dalek::{scalar::Scalar as RistrettoScalar, traits::MultiscalarMul, RistrettoPoint};
+use curve25519_dalek::{scalar::Scalar as RistrettoScalar, RistrettoPoint};
 use digest::Digest;
 use group::Group;
 use rand_core::CryptoRngCore;
@@ -69,9 +69,15 @@ pub enum PedersonCommitmentError {
 
 impl<Msg: Attributes<RistrettoScalar>> PedersonCommitment<RistrettoPoint, Msg> {
     pub fn commit_with_blind(msg: &Msg, blind: RistrettoScalar) -> Self {
-        let elem = RistrettoPoint::multiscalar_mul(
-            msg.attribute_elems().into_iter().chain([blind]),
-            Self::attribute_generators().chain([Self::blind_generator()]),
+        // NOTE: It would be more performant to use curve25519_dalek::MultiscalarMul here, but that
+        // requires the iterators to have an exact size. Panics at runtime otherwise. This could be
+        // addressed by improvements to attributes.
+        let elem = RistrettoPoint::sum(
+            itertools::zip_eq(
+                msg.attribute_elems().into_iter().chain([blind]),
+                Self::attribute_generators().chain([Self::blind_generator()]),
+            )
+            .map(|(x, g)| x * g),
         );
         Self {
             elem,

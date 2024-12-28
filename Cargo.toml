@@ -19,6 +19,7 @@ curve25519-dalek = { version = "4.1", default-features = false, features = ["zer
 digest = { version = "0.10.7", default-features = false }
 ff = { version = "0.13.0", default-features = false, features = ["bits", "derive", "derive_bits"] }
 group = { version = "0.13.0", default-features = false, features = ["rand"] }
+itertools = "0.13.0"
 lox-zkp = "0.8.1"
 nimue = { version = "0.1.1", default-features = false, features = ["group"] }
 rand_core = { version = "0.6", default-features = false }
@@ -28,6 +29,5 @@ typenum = { version = "1.17.0", features = ["no_std"] }
 zeroize = { version = "1.8.1", default-features = false }
 
 [dev-dependencies]
-itertools = "0.13.0"
-rkvc-derive = { path = "./derive" }
 rand = "0.8"
+rkvc-derive = { path = "./derive" }
