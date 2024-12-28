@@ -58,7 +58,7 @@ impl<Msg: Attributes<RistrettoScalar>> PedersonCommitment<RistrettoPoint, Msg> {
         }
     }
 
-    pub fn commit<R>(rng: &mut R, msg: &Msg) -> (Self, RistrettoScalar)
+    pub fn commit<R>(msg: &Msg, rng: &mut R) -> (Self, RistrettoScalar)
     where
         R: CryptoRngCore + ?Sized,
     {
@@ -96,8 +96,8 @@ mod test {
             b: Scalar::from(5u64),
         };
         let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
-            &mut rand::thread_rng(),
             &example,
+            &mut rand::thread_rng(),
         );
         commit.open(&example, blind).unwrap();
     }
@@ -109,8 +109,8 @@ mod test {
             b: Scalar::from(5u64),
         };
         let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
-            &mut rand::thread_rng(),
             &example,
+            &mut rand::thread_rng(),
         );
         commit.open(&example, blind).unwrap();
 

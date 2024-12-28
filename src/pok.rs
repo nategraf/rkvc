@@ -39,8 +39,8 @@ impl<G: Group, Msg> PoK<G, Msg> {
 
 impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
     pub fn prove(
-        commit: PedersonCommitment<RistrettoPoint, Msg>,
-        msg: Msg,
+        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        msg: &Msg,
         blind: RistrettoScalar,
     ) -> CompactProof {
         // TODO: Make these labels configurable.
@@ -83,7 +83,7 @@ impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
 
     pub fn verify(
         proof: &CompactProof,
-        commit: PedersonCommitment<RistrettoPoint, Msg>,
+        commit: &PedersonCommitment<RistrettoPoint, Msg>,
     ) -> Result<(), lox_zkp::ProofError> {
         // TODO: Make these labels configurable.
         let mut transcript = Transcript::new(b"PoKTranscript");
@@ -114,5 +114,61 @@ impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
 
         Self::constrain(&mut verifier, commit_var, msg_vars, gen_vars);
         verifier.verify_compact(proof)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use curve25519_dalek::{RistrettoPoint, Scalar};
+    use rkvc_derive::Attributes;
+
+    use super::PoK;
+    use crate::pederson::PedersonCommitment;
+
+    #[derive(Attributes)]
+    #[rkvc(field = curve25519_dalek::Scalar)]
+    struct Example {
+        a: Scalar,
+        b: Scalar,
+    }
+
+    #[test]
+    fn basic_success() {
+        let example = Example {
+            a: Scalar::from(42u64),
+            b: Scalar::from(5u64),
+        };
+        let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
+            &example,
+            &mut rand::thread_rng(),
+        );
+        let proof = PoK::<RistrettoPoint, Example>::prove(&commit, &example, blind);
+
+        PoK::<RistrettoPoint, Example>::verify(&proof, &commit).unwrap();
+    }
+
+    #[test]
+    fn basic_fail() {
+        let example = Example {
+            a: Scalar::from(42u64),
+            b: Scalar::from(5u64),
+        };
+        let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
+            &example,
+            &mut rand::thread_rng(),
+        );
+        let proof = PoK::<RistrettoPoint, Example>::prove(&commit, &example, blind);
+
+        let bad_example = Example {
+            a: Scalar::from(42u64),
+            b: Scalar::from(6u64),
+        };
+        let bad_commit =
+            PedersonCommitment::<RistrettoPoint, Example>::commit_with_blind(&bad_example, blind);
+        let Err(lox_zkp::ProofError::VerificationFailure) =
+            PoK::<RistrettoPoint, Example>::verify(&proof, &bad_commit)
+        else {
+            panic!("verify did not fail with verification failure");
+        };
     }
 }
