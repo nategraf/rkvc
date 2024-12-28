@@ -57,8 +57,8 @@ impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );
 
-        // TODO: Check if order matters here.
         // Allocate all the variables, note that this is repeated with respect to the verifier.
+        // NOTE: Order of variable allocation effects the transcript.
         let (commit_var, _) = prover.allocate_point(b"PoK::commit", commit.elem);
         let mut msg_vars = Vec::new();
         let mut gen_vars = Vec::new();
@@ -96,8 +96,8 @@ impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );
 
-        // TODO: Check if order matters here.
         // Allocate all the variables, note that this is repeated with respect to the verifier.
+        // NOTE: Order of variable allocation effects the transcript.
         let commit_var = verifier.allocate_point(b"PoK::commit", commit.elem.compress())?;
         let mut msg_vars = Vec::new();
         let mut gen_vars = Vec::new();
