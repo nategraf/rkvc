@@ -11,7 +11,7 @@ use lox_zkp::{
 };
 
 use crate::{
-    attributes::{Attributes, Encoder, Identity},
+    attributes::{Attributes, Identity},
     pederson::PedersonCommitment,
 };
 
