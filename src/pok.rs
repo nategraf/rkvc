@@ -11,7 +11,7 @@ use lox_zkp::{
 };
 
 use crate::{
-    attributes::{Attributes, Encoder},
+    attributes::{Attributes, Encoder, Identity},
     pederson::PedersonCommitment,
 };
 
@@ -40,6 +40,7 @@ impl<G: Group, Msg> PoK<G, Msg> {
 impl<Msg> PoK<RistrettoPoint, Msg>
 where
     Msg: Attributes<Encoder<RistrettoScalar>, RistrettoScalar>,
+    Msg: Attributes<Identity<RistrettoScalar>, RistrettoScalar>,
 {
     pub fn prove(
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
@@ -53,7 +54,7 @@ where
         // TODO: Does not ensure that the attribute elements are in the right range. Need to figure
         // out a way to flag this as unsafe automatically.
         let iter = itertools::zip_eq(
-            itertools::zip_eq(Msg::label_iter(), Encoder::encode(msg)),
+            itertools::zip_eq(Msg::label_iter(), Identity::elem_iter(msg)),
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );
 

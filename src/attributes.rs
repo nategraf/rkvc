@@ -37,6 +37,33 @@ impl<Output> Encoder<Output> {
     }
 }
 
+pub struct Identity<T>(PhantomData<T>);
+
+impl<T> Default for Identity<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T: Clone> Visitor<T> for Identity<T> {
+    type Output = T;
+
+    #[inline]
+    fn visit(&mut self, field: &T) -> Self::Output {
+        field.clone()
+    }
+}
+
+impl<T> Identity<T> {
+    // TODO: Understand wtf use does here.
+    pub fn elem_iter<A>(attributes: &A) -> impl Iterator<Item = T> + use<'_, A, T>
+    where
+        A: AttributeElems<Self, T>,
+    {
+        attributes.elem_walk(Self::default())
+    }
+}
+
 // TODO: Combine these into one traits that returns (label, f) at each index?
 pub trait AttributeLabels: Sized {
     fn label_at(i: usize) -> Option<&'static str>;
