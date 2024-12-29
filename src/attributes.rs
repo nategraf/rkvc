@@ -6,6 +6,8 @@ pub trait VisitorOutput {
 
 // TODO: Split into a Visitor and a VisitorMut trait? This might help resolve some of the
 // awkwardness of e.g. the AttributeElems::elem_at method.
+// TODO: Rename this to Encoder and remove the &mut on self? Revisit this after implementing proof
+// of knowledge with range tours.
 pub trait Visitor<T>: VisitorOutput {
     fn visit(&mut self, field: &T) -> Self::Output;
 }
