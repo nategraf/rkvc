@@ -61,7 +61,7 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
 
     // Generate the Elems implementation
     let elems_impl = quote! {
-        impl<V, O> #rkvc_path::AttributeElems<V, O> for #struct_name
+        impl<V, O> #rkvc_path::Attributes<V, O> for #struct_name
             where
                 #(V: #rkvc_path::attributes::Visitor<#field_types, Output = O>,)*
             {
