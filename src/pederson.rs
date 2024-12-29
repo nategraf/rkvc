@@ -9,7 +9,7 @@ use subtle::ConstantTimeEq;
 use typenum::U64;
 
 use crate::{
-    attributes::{Attributes, Encoder},
+    attributes::{AttributeLabels, Attributes, Encoder},
     hash::FromHash,
 };
 
@@ -27,9 +27,7 @@ pub enum PedersonCommitmentError {
 }
 
 // TODO: Make a way to precalculate the generators, including compressed versions.
-impl<G: Group + FromHash<OutputSize = U64>, Msg: Attributes<Encoder<G::Scalar>, G::Scalar>>
-    PedersonCommitment<G, Msg>
-{
+impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeLabels> PedersonCommitment<G, Msg> {
     pub fn blind_generator() -> G {
         // TODO: Make this configurable?
         G::hash_from_bytes::<Blake2b512>(b"PEDERSON_COMMIT_BLIND")

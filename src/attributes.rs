@@ -31,7 +31,7 @@ impl<Output> Encoder<Output> {
     // TODO: Understand wtf use does here.
     pub fn encode<A>(attributes: &A) -> impl Iterator<Item = Output> + use<'_, A, Output>
     where
-        A: AttributeElems<Self, Output>,
+        A: Attributes<Self, Output>,
     {
         attributes.elem_walk(Self::default())
     }
@@ -58,7 +58,7 @@ impl<T> Identity<T> {
     // TODO: Understand wtf use does here.
     pub fn elem_iter<A>(attributes: &A) -> impl Iterator<Item = T> + use<'_, A, T>
     where
-        A: AttributeElems<Self, T>,
+        A: Attributes<Self, T>,
     {
         attributes.elem_walk(Self::default())
     }
@@ -73,20 +73,13 @@ pub trait AttributeLabels: Sized {
     }
 }
 
-pub trait AttributeElems<V, O>: Sized {
+pub trait Attributes<V, O>: AttributeLabels {
     fn elem_at(&self, i: usize, visitor: &mut V) -> Option<O>;
 
     fn elem_walk(&self, mut visitor: impl BorrowMut<V>) -> impl Iterator<Item = O> {
         (0..).map_while(move |i| self.elem_at(i, visitor.borrow_mut()))
     }
 }
-
-/// NOTE: This is a simple combination of AttributeLabels and AttributeElems. These are implemented
-/// as seperate traits such that callsites such as Example::label_iter() is unambigous, and does
-/// not require the <V, O> generics to be specified.
-pub trait Attributes<V, O>: AttributeElems<V, O> + AttributeLabels {}
-
-impl<T, V, O> Attributes<V, O> for T where T: AttributeElems<V, O> + AttributeLabels {}
 
 #[cfg(test)]
 mod test {
