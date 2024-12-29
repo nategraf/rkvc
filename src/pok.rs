@@ -52,8 +52,6 @@ where
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut prover = Prover::new(b"PoKConstraints", &mut transcript);
 
-        // TODO: Does not ensure that the attribute elements are in the right range. Need to figure
-        // out a way to flag this as unsafe automatically.
         let iter = itertools::zip_eq(
             itertools::zip_eq(Msg::label_iter(), Identity::elem_iter(msg)),
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
@@ -91,8 +89,6 @@ where
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut verifier = Verifier::new(b"PoKConstraints", &mut transcript);
 
-        // TODO: Does not ensure that the attribute elements are in the right range. Need to figure
-        // out a way to flag this as unsafe automatically.
         let iter = itertools::zip_eq(
             Msg::label_iter(),
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
