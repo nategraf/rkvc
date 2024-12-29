@@ -18,6 +18,14 @@ impl<T> Default for Encoder<T> {
     }
 }
 
+impl<T> Visitor<Never> for Encoder<T> {
+    type Output = T;
+
+    fn visit(&mut self, never: &Never) -> Self::Output {
+        match *never {}
+    }
+}
+
 impl<T: Into<Output> + Clone, Output> Visitor<T> for Encoder<Output> {
     type Output = Output;
 
@@ -31,7 +39,7 @@ impl<Output> Encoder<Output> {
     // TODO: Understand wtf use does here.
     pub fn encode<A>(attributes: &A) -> impl Iterator<Item = Output> + use<'_, A, Output>
     where
-        A: Attributes<Self, Output>,
+        A: Attributes<Self>,
     {
         attributes.elem_walk(Self::default())
     }
@@ -42,6 +50,14 @@ pub struct Identity<T>(PhantomData<T>);
 impl<T> Default for Identity<T> {
     fn default() -> Self {
         Self(PhantomData)
+    }
+}
+
+impl<T> Visitor<Never> for Identity<T> {
+    type Output = T;
+
+    fn visit(&mut self, never: &Never) -> Self::Output {
+        match *never {}
     }
 }
 
@@ -58,7 +74,7 @@ impl<T> Identity<T> {
     // TODO: Understand wtf use does here.
     pub fn elem_iter<A>(attributes: &A) -> impl Iterator<Item = T> + use<'_, A, T>
     where
-        A: Attributes<Self, T>,
+        A: Attributes<Self>,
     {
         attributes.elem_walk(Self::default())
     }
@@ -73,10 +89,18 @@ pub trait AttributeLabels: Sized {
     }
 }
 
-pub trait Attributes<V, O>: AttributeLabels {
-    fn elem_at(&self, i: usize, visitor: &mut V) -> Option<O>;
+/// Implementation of the never type (!), used in Visitor<Never> to encode the output type.
+///
+/// Can be replaced with ! when it is stable for use in generics.
+pub enum Never {}
 
-    fn elem_walk(&self, mut visitor: impl BorrowMut<V>) -> impl Iterator<Item = O> {
+pub trait Attributes<V>: AttributeLabels
+where
+    V: Visitor<Never>,
+{
+    fn elem_at(&self, i: usize, visitor: &mut V) -> Option<V::Output>;
+
+    fn elem_walk(&self, mut visitor: impl BorrowMut<V>) -> impl Iterator<Item = V::Output> {
         (0..).map_while(move |i| self.elem_at(i, visitor.borrow_mut()))
     }
 }
