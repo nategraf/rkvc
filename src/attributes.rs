@@ -5,9 +5,11 @@ use core::{borrow::BorrowMut, marker::PhantomData};
 pub trait Visitor<T> {
     type Output;
 
-    fn visit(&mut self, field: T) -> Self::Output;
+    fn visit(&mut self, field: &T) -> Self::Output;
 }
 
+// TODO: Should this exist? It's essentially one simple codec, and it's useful if it has the right
+// semantics for where it can be applied. It's unclear whether or not that is true.
 pub struct Encoder<Output>(PhantomData<Output>);
 
 impl<T> Default for Encoder<T> {
@@ -16,12 +18,12 @@ impl<T> Default for Encoder<T> {
     }
 }
 
-impl<T: Into<Output>, Output> Visitor<T> for Encoder<Output> {
+impl<T: Into<Output> + Clone, Output> Visitor<T> for Encoder<Output> {
     type Output = Output;
 
-    #[inline] // TODO: Is this doing anything?
-    fn visit(&mut self, field: T) -> Self::Output {
-        field.into()
+    #[inline]
+    fn visit(&mut self, field: &T) -> Self::Output {
+        field.clone().into()
     }
 }
 
@@ -61,40 +63,14 @@ impl<T, V, O> Attributes<V, O> for T where T: AttributeElems<V, O> + AttributeLa
 
 #[cfg(test)]
 mod test {
-    //use rkvc_derive::Attributes;
+    use rkvc_derive::Attributes;
 
     use super::{AttributeLabels, Encoder};
 
-    // macro expanded below.
-    //#[derive(Attributes)]
-    //#[rkvc(field = curve25519_dalek::Scalar)]
+    #[derive(Attributes)]
     struct Example {
         foo: u64,
         bar: u32,
-    }
-
-    impl crate::AttributeLabels for Example {
-        fn label_at(i: usize) -> Option<&'static str> {
-            match i {
-                0usize => Some("Example::foo"),
-                1usize => Some("Example::bar"),
-                _ => None,
-            }
-        }
-    }
-
-    impl<V, O> crate::AttributeElems<V, O> for Example
-    where
-        V: crate::attributes::Visitor<u64, Output = O>,
-        V: crate::attributes::Visitor<u32, Output = O>,
-    {
-        fn elem_at(&self, i: usize, visitor: &mut V) -> Option<O> {
-            match i {
-                0usize => Some(visitor.visit(self.foo)),
-                1usize => Some(visitor.visit(self.bar)),
-                _ => None,
-            }
-        }
     }
 
     #[test]

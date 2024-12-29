@@ -11,7 +11,7 @@ use lox_zkp::{
 };
 
 use crate::{
-    attributes::{AttributeElems, AttributeLabels, Attributes},
+    attributes::{Attributes, Encoder},
     pederson::PedersonCommitment,
 };
 
@@ -37,7 +37,10 @@ impl<G: Group, Msg> PoK<G, Msg> {
     }
 }
 
-impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
+impl<Msg> PoK<RistrettoPoint, Msg>
+where
+    Msg: Attributes<Encoder<RistrettoScalar>, RistrettoScalar>,
+{
     pub fn prove(
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
         msg: &Msg,
@@ -50,10 +53,7 @@ impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
         // TODO: Does not ensure that the attribute elements are in the right range. Need to figure
         // out a way to flag this as unsafe automatically.
         let iter = itertools::zip_eq(
-            itertools::zip_eq(
-                Msg::attribute_labels().into_iter(),
-                msg.attribute_elems().into_iter(),
-            ),
+            itertools::zip_eq(Msg::label_iter(), Encoder::encode(msg)),
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );
 
@@ -63,7 +63,7 @@ impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
         let mut msg_vars = Vec::new();
         let mut gen_vars = Vec::new();
         for ((label, x), g) in iter {
-            // TODO: differentiate these labels
+            // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
             msg_vars.push(prover.allocate_scalar(label.as_bytes(), x));
             gen_vars.push(prover.allocate_point(label.as_bytes(), g).0);
         }
@@ -92,7 +92,7 @@ impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
         // TODO: Does not ensure that the attribute elements are in the right range. Need to figure
         // out a way to flag this as unsafe automatically.
         let iter = itertools::zip_eq(
-            Msg::attribute_labels().into_iter(),
+            Msg::label_iter(),
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );
 
@@ -102,7 +102,7 @@ impl<Msg: Attributes<RistrettoScalar>> PoK<RistrettoPoint, Msg> {
         let mut msg_vars = Vec::new();
         let mut gen_vars = Vec::new();
         for (label, g) in iter {
-            // TODO: differentiate these labels
+            // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
             msg_vars.push(verifier.allocate_scalar(label.as_bytes()));
             gen_vars.push(verifier.allocate_point(label.as_bytes(), g.compress())?);
         }
@@ -126,7 +126,6 @@ mod test {
     use crate::pederson::PedersonCommitment;
 
     #[derive(Attributes)]
-    #[rkvc(field = curve25519_dalek::Scalar)]
     struct Example {
         a: Scalar,
         b: Scalar,

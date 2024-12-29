@@ -9,7 +9,7 @@ use subtle::ConstantTimeEq;
 use typenum::U64;
 
 use crate::{
-    attributes::{AttributeElems, AttributeLabels, Attributes},
+    attributes::{Attributes, Encoder},
     hash::FromHash,
 };
 
@@ -27,27 +27,32 @@ pub enum PedersonCommitmentError {
 }
 
 // TODO: Make a way to precalculate the generators, including compressed versions.
-impl<G: Group + FromHash<OutputSize = U64>, Msg: Attributes<G::Scalar>> PedersonCommitment<G, Msg> {
+impl<G: Group + FromHash<OutputSize = U64>, Msg: Attributes<Encoder<G::Scalar>, G::Scalar>>
+    PedersonCommitment<G, Msg>
+{
     pub fn blind_generator() -> G {
         // TODO: Make this configurable?
         G::hash_from_bytes::<Blake2b512>(b"PEDERSON_COMMIT_BLIND")
     }
 
     pub fn attribute_generators() -> impl Iterator<Item = G> {
-        Msg::attribute_labels()
-            .into_iter()
-            .map(|label| G::hash_from_bytes::<Blake2b512>(label.as_bytes()))
+        Msg::label_iter().map(|label| G::hash_from_bytes::<Blake2b512>(label.as_bytes()))
     }
 }
 
-impl<Msg: Attributes<RistrettoScalar>> PedersonCommitment<RistrettoPoint, Msg> {
+// TODO: Is it possible to reduce how repettive RistrettoScalar and RistrettoPoint are? For one,
+// try changing RistrettoPoint to G here.
+impl<Msg> PedersonCommitment<RistrettoPoint, Msg>
+where
+    Msg: Attributes<Encoder<RistrettoScalar>, RistrettoScalar>,
+{
     pub fn commit_with_blind(msg: &Msg, blind: RistrettoScalar) -> Self {
         // NOTE: It would be more performant to use curve25519_dalek::MultiscalarMul here, but that
         // requires the iterators to have an exact size. Panics at runtime otherwise. This could be
         // addressed by improvements to attributes.
         let elem = RistrettoPoint::sum(
             itertools::zip_eq(
-                msg.attribute_elems().into_iter().chain([blind]),
+                Encoder::encode(msg).chain([blind]),
                 Self::attribute_generators().chain([Self::blind_generator()]),
             )
             .map(|(x, g)| x * g),
@@ -83,7 +88,6 @@ mod test {
     use super::{PedersonCommitment, PedersonCommitmentError};
 
     #[derive(Attributes)]
-    #[rkvc(field = curve25519_dalek::Scalar)]
     struct Example {
         a: u64,
         b: Scalar,
