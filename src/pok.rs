@@ -39,7 +39,7 @@ impl<G: Group, Msg> PoK<G, Msg> {
 
 impl<Msg> PoK<RistrettoPoint, Msg>
 where
-    Msg: Attributes<Identity<RistrettoScalar>, RistrettoScalar>,
+    Msg: Attributes<Identity<RistrettoScalar>>,
 {
     pub fn prove(
         commit: &PedersonCommitment<RistrettoPoint, Msg>,

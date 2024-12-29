@@ -61,11 +61,12 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
 
     // Generate the Elems implementation
     let elems_impl = quote! {
-        impl<V, O> #rkvc_path::Attributes<V, O> for #struct_name
+        impl<V> #rkvc_path::Attributes<V> for #struct_name
             where
-                #(V: #rkvc_path::attributes::Visitor<#field_types, Output = O>,)*
+                V: #rkvc_path::attributes::VisitorOutput,
+                #(V: #rkvc_path::attributes::Visitor<#field_types>,)*
             {
-            fn elem_at(&self, i: usize, visitor: &mut V) -> Option<O> {
+            fn elem_at(&self, i: usize, visitor: &mut V) -> Option<V::Output> {
                 match i {
                     #(#indices => Some(visitor.visit(&self.#field_names)),)*
                     _ => None,

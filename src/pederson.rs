@@ -42,7 +42,7 @@ impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeLabels> PedersonCommit
 // try changing RistrettoPoint to G here.
 impl<Msg> PedersonCommitment<RistrettoPoint, Msg>
 where
-    Msg: Attributes<Encoder<RistrettoScalar>, RistrettoScalar>,
+    Msg: Attributes<Encoder<RistrettoScalar>>,
 {
     pub fn commit_with_blind(msg: &Msg, blind: RistrettoScalar) -> Self {
         // NOTE: It would be more performant to use curve25519_dalek::MultiscalarMul here, but that

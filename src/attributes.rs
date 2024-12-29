@@ -1,10 +1,12 @@
 use core::{borrow::BorrowMut, marker::PhantomData};
 
+pub trait VisitorOutput {
+    type Output;
+}
+
 // TODO: Split into a Visitor and a VisitorMut trait? This might help resolve some of the
 // awkwardness of e.g. the AttributeElems::elem_at method.
-pub trait Visitor<T> {
-    type Output;
-
+pub trait Visitor<T>: VisitorOutput {
     fn visit(&mut self, field: &T) -> Self::Output;
 }
 
@@ -18,26 +20,20 @@ impl<T> Default for Encoder<T> {
     }
 }
 
-impl<T> Visitor<Never> for Encoder<T> {
+impl<T> VisitorOutput for Encoder<T> {
     type Output = T;
-
-    fn visit(&mut self, never: &Never) -> Self::Output {
-        match *never {}
-    }
 }
 
 impl<T: Into<Output> + Clone, Output> Visitor<T> for Encoder<Output> {
-    type Output = Output;
-
     #[inline]
     fn visit(&mut self, field: &T) -> Self::Output {
         field.clone().into()
     }
 }
 
-impl<Output> Encoder<Output> {
+impl<T> Encoder<T> {
     // TODO: Understand wtf use does here.
-    pub fn encode<A>(attributes: &A) -> impl Iterator<Item = Output> + use<'_, A, Output>
+    pub fn encode<A>(attributes: &A) -> impl Iterator<Item = T> + use<'_, A, T>
     where
         A: Attributes<Self>,
     {
@@ -53,17 +49,11 @@ impl<T> Default for Identity<T> {
     }
 }
 
-impl<T> Visitor<Never> for Identity<T> {
+impl<T> VisitorOutput for Identity<T> {
     type Output = T;
-
-    fn visit(&mut self, never: &Never) -> Self::Output {
-        match *never {}
-    }
 }
 
 impl<T: Clone> Visitor<T> for Identity<T> {
-    type Output = T;
-
     #[inline]
     fn visit(&mut self, field: &T) -> Self::Output {
         field.clone()
@@ -96,7 +86,7 @@ pub enum Never {}
 
 pub trait Attributes<V>: AttributeLabels
 where
-    V: Visitor<Never>,
+    V: VisitorOutput,
 {
     fn elem_at(&self, i: usize, visitor: &mut V) -> Option<V::Output>;
 
