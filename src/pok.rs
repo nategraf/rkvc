@@ -39,6 +39,7 @@ impl<G: Group, Msg> PoK<G, Msg> {
 
 impl<Msg> PoK<RistrettoPoint, Msg>
 where
+    // TODO: This is a bit awkward.
     Msg: Attributes<Encoder<RistrettoScalar>, RistrettoScalar>,
     Msg: Attributes<Identity<RistrettoScalar>, RistrettoScalar>,
 {
