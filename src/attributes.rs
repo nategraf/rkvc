@@ -81,11 +81,6 @@ pub trait AttributeLabels: Sized {
     }
 }
 
-/// Implementation of the never type (!), used in Visitor<Never> to encode the output type.
-///
-/// Can be replaced with ! when it is stable for use in generics.
-pub enum Never {}
-
 pub trait Attributes<V>: AttributeLabels
 where
     V: VisitorOutput,
