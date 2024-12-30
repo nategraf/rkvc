@@ -15,6 +15,7 @@ edition = { workspace = true }
 
 [dependencies]
 blake2 = { version = "0.10.6", default-features = false }
+bulletproofs = { version = "5.0.0", default-features = false, features = ["rand", "thiserror"] }
 curve25519-dalek = { version = "4.1", default-features = false, features = ["zeroize", "precomputed-tables", "rand_core", "digest", "serde", "group"] }
 digest = { version = "0.10.7", default-features = false }
 ff = { version = "0.13.0", default-features = false, features = ["bits", "derive", "derive_bits"] }
