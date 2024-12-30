@@ -10,8 +10,9 @@ pub use attributes::{AttributeLabels, Attributes, Encoder};
 pub mod hash;
 pub mod pederson;
 
-// TODO: Remove this
+// TODO: Remove these
 pub mod pok;
+pub mod range;
 
 use rand_core::CryptoRng;
 

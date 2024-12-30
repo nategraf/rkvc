@@ -1,4 +1,4 @@
-//! Proof of knowledge for a Pederson commitment opening.
+//! Proof of knowledge for a Pederson commitment opening, with range checks.
 //! NOTE: WIP module to be broken up.
 
 use core::marker::PhantomData;
