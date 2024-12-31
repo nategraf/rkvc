@@ -146,7 +146,7 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
                 }
             }
 
-            fn attribute_type_at(&self, i: usize, visitor: &mut V) -> Option<V::StaticOutput> {
+            fn attribute_type_at(i: usize, visitor: &mut V) -> Option<V::StaticOutput> {
                 match i {
                     #(#indices => Some(<V as #rkvc_path::attributes::Visitor<#attribute_types>>::visit_static(visitor)),)*
                     _ => None,

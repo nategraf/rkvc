@@ -23,6 +23,7 @@ group = { version = "0.13.0", default-features = false, features = ["rand"] }
 itertools = "0.13.0"
 lox-zkp = "0.8.1"
 nimue = { version = "0.1.1", default-features = false, features = ["group"] }
+rand = { version = "0.8", features = ["std_rng"] }
 rand_core = { version = "0.6", default-features = false }
 subtle = { version = "2.6", default-features = false }
 thiserror = { version = "2.0.9", default-features = false }
@@ -30,7 +31,6 @@ typenum = { version = "1.17.0", features = ["no_std"] }
 zeroize = { version = "1.8.1", default-features = false }
 
 [dev-dependencies]
-rand = "0.8"
 rkvc = { path = ".", features = ["std"] }
 rkvc-derive = { path = "./derive" }
 

@@ -2,7 +2,10 @@ use core::{iter::Sum, marker::PhantomData};
 
 use blake2::Blake2b512;
 
-use curve25519_dalek::{scalar::Scalar as RistrettoScalar, RistrettoPoint};
+use curve25519_dalek::{
+    ristretto::{CompressedRistretto, RistrettoPoint},
+    scalar::Scalar as RistrettoScalar,
+};
 use group::Group;
 use rand_core::CryptoRngCore;
 use subtle::ConstantTimeEq;
@@ -14,7 +17,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub struct PedersonCommitment<G: Group, Msg> {
+pub struct PedersonCommitment<G, Msg> {
     pub elem: G,
     _phantom_msg: PhantomData<Msg>,
 }
@@ -38,8 +41,6 @@ impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeLabels> PedersonCommit
     }
 }
 
-// TODO: Is it possible to reduce how repettive RistrettoScalar and RistrettoPoint are? For one,
-// try changing RistrettoPoint to G here.
 impl<Msg> PedersonCommitment<RistrettoPoint, Msg>
 where
     Msg: Attributes<UintEncoder<RistrettoScalar>>,
@@ -75,6 +76,24 @@ where
             true => Ok(()),
             false => Err(PedersonCommitmentError::VerificationError),
         }
+    }
+}
+
+impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
+    pub fn compress(&self) -> PedersonCommitment<CompressedRistretto, Msg> {
+        PedersonCommitment {
+            elem: self.elem.compress(),
+            _phantom_msg: PhantomData,
+        }
+    }
+}
+
+impl<Msg> PedersonCommitment<CompressedRistretto, Msg> {
+    pub fn decompress(&self) -> Option<PedersonCommitment<RistrettoPoint, Msg>> {
+        Some(PedersonCommitment {
+            elem: self.elem.decompress()?,
+            _phantom_msg: PhantomData,
+        })
     }
 }
 

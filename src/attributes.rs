@@ -126,13 +126,12 @@ where
         (0..).map_while(move |i| self.attribute_at(i, visitor.borrow_mut()))
     }
 
-    fn attribute_type_at(&self, i: usize, visitor: &mut V) -> Option<V::StaticOutput>;
+    fn attribute_type_at(i: usize, visitor: &mut V) -> Option<V::StaticOutput>;
 
     fn attribute_type_walk(
-        &self,
         mut visitor: impl BorrowMut<V>,
     ) -> impl Iterator<Item = V::StaticOutput> {
-        (0..).map_while(move |i| self.attribute_type_at(i, visitor.borrow_mut()))
+        (0..).map_while(move |i| Self::attribute_type_at(i, visitor.borrow_mut()))
     }
 }
 
