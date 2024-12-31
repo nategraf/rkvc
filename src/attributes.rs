@@ -9,31 +9,51 @@ pub trait VisitorOutput {
 // TODO: Rename this to Encoder and remove the &mut on self? Revisit this after implementing proof
 // of knowledge with range tours.
 pub trait Visitor<T>: VisitorOutput {
-    fn visit(&mut self, field: &T) -> Self::Output;
+    fn visit(&mut self, value: &T) -> Self::Output;
 }
 
-// TODO: Should this exist? It's essentially one simple codec, and it's useful if it has the right
-// semantics for where it can be applied. It's unclear whether or not that is true.
-pub struct Encoder<Output>(PhantomData<Output>);
+pub struct UintEncoder<T>(PhantomData<T>);
 
-impl<T> Default for Encoder<T> {
+impl<T> Default for UintEncoder<T> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<T> VisitorOutput for Encoder<T> {
+impl<T> VisitorOutput for UintEncoder<T> {
     type Output = T;
 }
 
-impl<T: Into<Output> + Clone, Output> Visitor<T> for Encoder<Output> {
+/// Private marker trait used to reduce boiler-plate;
+trait PrimitiveUint: Copy {}
+impl PrimitiveUint for u8 {}
+impl PrimitiveUint for u16 {}
+impl PrimitiveUint for u32 {}
+impl PrimitiveUint for u64 {}
+impl PrimitiveUint for u128 {}
+
+impl<Uint: PrimitiveUint + Into<T>, T> Visitor<Uint> for UintEncoder<T> {
     #[inline]
-    fn visit(&mut self, field: &T) -> Self::Output {
-        field.clone().into()
+    fn visit(&mut self, value: &Uint) -> Self::Output {
+        (*value).into()
     }
 }
 
-impl<T> Encoder<T> {
+// NOTE: Implemented on the concrete type rather than over all T because T could include e.g. u64.
+// With specialization, it would be possible achieve this. Attempted to use autoref specialization
+// without success. See the article below for more information about autoref specialization.
+// http://lukaskalbertodt.github.io/2019/12/05/generalized-autoref-based-specialization.html
+//
+// A concrete consiquence of this is that UintEncoder cannot work for field types that this crate
+// does not explicitly add here. One solution to this would be provide a macro to quickly and
+// easily implement a uint encoder for the provided (field) type. Unclear on the value of this.
+impl Visitor<curve25519_dalek::Scalar> for UintEncoder<curve25519_dalek::Scalar> {
+    fn visit(&mut self, value: &curve25519_dalek::Scalar) -> Self::Output {
+        *value
+    }
+}
+
+impl<T> UintEncoder<T> {
     // TODO: Understand wtf use does here.
     pub fn encode<A>(attributes: &A) -> impl Iterator<Item = T> + use<'_, A, T>
     where
@@ -57,8 +77,8 @@ impl<T> VisitorOutput for Identity<T> {
 
 impl<T: Clone> Visitor<T> for Identity<T> {
     #[inline]
-    fn visit(&mut self, field: &T) -> Self::Output {
-        field.clone()
+    fn visit(&mut self, value: &T) -> Self::Output {
+        value.clone()
     }
 }
 
@@ -96,7 +116,7 @@ where
 mod test {
     use rkvc_derive::Attributes;
 
-    use super::{AttributeLabels, Encoder};
+    use super::{AttributeLabels, UintEncoder};
 
     #[derive(Attributes)]
     struct Example {
@@ -107,7 +127,8 @@ mod test {
     #[test]
     fn zip_example() {
         let example = Example { foo: 5, bar: 7 };
-        for (label, x) in itertools::zip_eq(Example::label_iter(), Encoder::<u64>::encode(&example))
+        for (label, x) in
+            itertools::zip_eq(Example::label_iter(), UintEncoder::<u64>::encode(&example))
         {
             println!("{label}: {x:?}");
         }

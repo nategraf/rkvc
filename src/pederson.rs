@@ -9,7 +9,7 @@ use subtle::ConstantTimeEq;
 use typenum::U64;
 
 use crate::{
-    attributes::{AttributeLabels, Attributes, Encoder},
+    attributes::{AttributeLabels, Attributes, UintEncoder},
     hash::FromHash,
 };
 
@@ -42,7 +42,7 @@ impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeLabels> PedersonCommit
 // try changing RistrettoPoint to G here.
 impl<Msg> PedersonCommitment<RistrettoPoint, Msg>
 where
-    Msg: Attributes<Encoder<RistrettoScalar>>,
+    Msg: Attributes<UintEncoder<RistrettoScalar>>,
 {
     pub fn commit_with_blind(msg: &Msg, blind: RistrettoScalar) -> Self {
         // NOTE: It would be more performant to use curve25519_dalek::MultiscalarMul here, but that
@@ -50,7 +50,7 @@ where
         // addressed by improvements to attributes.
         let elem = RistrettoPoint::sum(
             itertools::zip_eq(
-                Encoder::encode(msg).chain([blind]),
+                UintEncoder::encode(msg).chain([blind]),
                 Self::attribute_generators().chain([Self::blind_generator()]),
             )
             .map(|(x, g)| x * g),
