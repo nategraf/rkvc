@@ -4,7 +4,7 @@ use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span};
 use proc_macro_crate::FoundCrate;
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, spanned::Spanned, Data, DeriveInput, Fields, Type};
+use syn::{parse_macro_input, parse_quote, spanned::Spanned, Data, DeriveInput, Fields, Type};
 
 // TODO: Fill this in, copying from below.
 fn is_primitive_type(ty: &syn::TypePath) -> bool {
@@ -52,38 +52,64 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         unimplemented!("Not implemented for empty structs");
     }
 
-    let visit_field_args: Vec<_> = fields
+    // Collect all the types found on fields in the struct, as they will presented to the visitor.
+    // Primitve types (i.e. uints, ints, bool, char) passed by value, others passed by reference.
+    let attribute_types_res: Result<Vec<_>, _> = fields
         .iter()
-        .map(|f| {
-            let ident = f.ident.as_ref().unwrap();
+        .map(|f| -> Result<Type, _> {
             match f.ty {
                 Type::Path(ref p) => match is_primitive_type(p) {
-                    true => quote_spanned!(f.span() => self.#ident),
-                    false => quote_spanned!(f.span() => &self.#ident),
+                    true => Ok(f.ty.clone()),
+                    false => {
+                        let ty = f.ty.clone();
+                        Ok(parse_quote!(&#ty))
+                    }
                 },
-                _ => quote_spanned!(f.ty.span() => compile_error!("Only type paths are supported")),
+                _ => Err(
+                    quote_spanned!(f.ty.span() => compile_error!("Only type paths are supported")),
+                ),
+            }
+        })
+        .collect();
+
+    let attribute_types = match attribute_types_res {
+        Ok(a) => a,
+        Err(compile_err) => {
+            return compile_err.into();
+        }
+    };
+
+    // Construct the argument(s) to the visit methods. Take a refernce if
+    let visit_field_args: Vec<_> = std::iter::zip(
+        fields
+        .iter(),
+        attribute_types.iter())
+        .map(|(f, attr_ty)| {
+            let ident = f.ident.as_ref().unwrap();
+            match attr_ty {
+                Type::Path(_) => quote_spanned!(f.span() => self.#ident),
+                Type::Reference(_) => quote_spanned!(f.span() => &self.#ident),
+                _ => unreachable!("macro implementation error: checks failed to ensure exhaustive handling of field types"),
             }
         })
         .collect();
 
     // Collect all the unique types found on fields in the struct, and render them into the type
-    // bounds that will be applied to the visitor type on the Attributes implementation.
-    let visitor_type_bounds: Vec<_> = fields
-        .iter()
-        .map(|f| f.ty.clone())
+    // bounds that will be applied to the visitor type on the Attributes implementation. Generate a
+    // type bound on e.g. Visitor<u64> for primitive types Visitor<&T> for all other types.
+    let visitor_type_bounds: Vec<_> = std::iter::zip(
+            fields.iter().map(|f| f.ty.clone()),
+            attribute_types.iter().cloned()
+        )
         .collect::<HashSet<_>>()
         .into_iter()
-        .map(|ty| match ty {
-            Type::Path(ref p) => match is_primitive_type(p) {
-                // Generate a type bound on e.g. Visitor<u64> for small primitive types
-                // Visitor<&T> for all other types.
-                true => quote_spanned!(ty.span() => #rkvc_path::attributes::Visitor<#ty>),
-                false => {
-                    quote_spanned!(ty.span() => for<'a> #rkvc_path::attributes::Visitor<&'a #ty>)
-                }
-            },
-            _ => quote_spanned!(ty.span() => compile_error!("Only type paths are supported")),
-        })
+        .map(|(ty, attr_ty)|
+            match attr_ty {
+                Type::Path(_) => quote_spanned!(ty.span() => #rkvc_path::attributes::Visitor<#ty>),
+                Type::Reference(_) => quote_spanned!(ty.span() => for<'a> #rkvc_path::attributes::Visitor<&'a #ty>),
+                _ => unreachable!("macro implementation error: checks failed to ensure exhaustive handling of field types"),
+            }
+        )
         .collect();
 
     // TODO: Add a #[label = "foo"] attribute that can be used to specify the field label manually.
@@ -107,15 +133,22 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
     };
 
     // Generate the Elems implementation
-    let elems_impl = quote! {
+    let attr_impl = quote! {
         impl<V> #rkvc_path::Attributes<V> for #struct_name
-            where
-                V: #rkvc_path::attributes::VisitorOutput,
-                #(V: #visitor_type_bounds,)*
-            {
-            fn elem_at(&self, i: usize, visitor: &mut V) -> Option<V::Output> {
+        where
+            V: #rkvc_path::attributes::VisitorOutput,
+            #(V: #visitor_type_bounds,)*
+        {
+            fn attribute_at(&self, i: usize, visitor: &mut V) -> Option<V::Output> {
                 match i {
                     #(#indices => Some(visitor.visit(#visit_field_args)),)*
+                    _ => None,
+                }
+            }
+
+            fn attribute_type_at(&self, i: usize, visitor: &mut V) -> Option<V::StaticOutput> {
+                match i {
+                    #(#indices => Some(<V as #rkvc_path::attributes::Visitor<#attribute_types>>::visit_static(visitor)),)*
                     _ => None,
                 }
             }
@@ -124,7 +157,7 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
 
     quote! {
         #labels_impl
-        #elems_impl
+        #attr_impl
     }
     .into()
 }

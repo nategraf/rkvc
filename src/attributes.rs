@@ -7,7 +7,7 @@ pub trait VisitorOutput {
 }
 
 // TODO: Split into a Visitor and a VisitorMut trait? This might help resolve some of the
-// awkwardness of e.g. the AttributeElems::elem_at method.
+// awkwardness of e.g. the AttributeElems::attribute_at method.
 // TODO: Rename this to Encoder and remove the &mut on self? Revisit this after implementing proof
 // of knowledge with range tours.
 pub trait Visitor<T>: VisitorOutput {
@@ -64,7 +64,7 @@ impl<T> UintEncoder<T> {
     where
         A: Attributes<Self>,
     {
-        attributes.elem_walk(Self::default())
+        attributes.attribute_walk(Self::default())
     }
 }
 
@@ -103,7 +103,7 @@ impl<T> Identity<T> {
     where
         A: Attributes<Self>,
     {
-        attributes.elem_walk(Self::default())
+        attributes.attribute_walk(Self::default())
     }
 }
 
@@ -120,10 +120,19 @@ pub trait Attributes<V>: AttributeLabels
 where
     V: VisitorOutput,
 {
-    fn elem_at(&self, i: usize, visitor: &mut V) -> Option<V::Output>;
+    fn attribute_at(&self, i: usize, visitor: &mut V) -> Option<V::Output>;
 
-    fn elem_walk(&self, mut visitor: impl BorrowMut<V>) -> impl Iterator<Item = V::Output> {
-        (0..).map_while(move |i| self.elem_at(i, visitor.borrow_mut()))
+    fn attribute_walk(&self, mut visitor: impl BorrowMut<V>) -> impl Iterator<Item = V::Output> {
+        (0..).map_while(move |i| self.attribute_at(i, visitor.borrow_mut()))
+    }
+
+    fn attribute_type_at(&self, i: usize, visitor: &mut V) -> Option<V::StaticOutput>;
+
+    fn attribute_type_walk(
+        &self,
+        mut visitor: impl BorrowMut<V>,
+    ) -> impl Iterator<Item = V::StaticOutput> {
+        (0..).map_while(move |i| self.attribute_type_at(i, visitor.borrow_mut()))
     }
 }
 
