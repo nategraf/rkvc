@@ -1,7 +1,9 @@
-use core::{borrow::BorrowMut, marker::PhantomData};
+use core::{borrow::BorrowMut, convert::Infallible, marker::PhantomData};
 
 pub trait VisitorOutput {
     type Output;
+
+    type StaticOutput;
 }
 
 // TODO: Split into a Visitor and a VisitorMut trait? This might help resolve some of the
@@ -10,6 +12,11 @@ pub trait VisitorOutput {
 // of knowledge with range tours.
 pub trait Visitor<T>: VisitorOutput {
     fn visit(&mut self, value: T) -> Self::Output;
+
+    // TODO: Find a better name for this after having some examples of using it.
+    fn visit_static(&mut self) -> Self::StaticOutput {
+        unimplemented!("visitor does not implement visit_static")
+    }
 }
 
 pub struct UintEncoder<T>(PhantomData<T>);
@@ -22,57 +29,28 @@ impl<T> Default for UintEncoder<T> {
 
 impl<T> VisitorOutput for UintEncoder<T> {
     type Output = T;
+
+    /// UintEncoder does not implement visit_static.
+    type StaticOutput = Infallible;
 }
 
-impl<T> Visitor<u8> for UintEncoder<T>
-where
-    u8: Into<T>,
-{
-    #[inline]
-    fn visit(&mut self, value: u8) -> Self::Output {
-        value.into()
-    }
+macro_rules! impl_visitor_uint_encoder {
+    ($($t:ty),*) => {
+        $(
+            impl<T> Visitor<$t> for UintEncoder<T>
+            where
+                $t: Into<T>,
+            {
+                #[inline]
+                fn visit(&mut self, value: $t) -> Self::Output {
+                    value.into()
+                }
+            }
+        )*
+    };
 }
 
-impl<T> Visitor<u16> for UintEncoder<T>
-where
-    u16: Into<T>,
-{
-    #[inline]
-    fn visit(&mut self, value: u16) -> Self::Output {
-        value.into()
-    }
-}
-
-impl<T> Visitor<u32> for UintEncoder<T>
-where
-    u32: Into<T>,
-{
-    #[inline]
-    fn visit(&mut self, value: u32) -> Self::Output {
-        value.into()
-    }
-}
-
-impl<T> Visitor<u64> for UintEncoder<T>
-where
-    u64: Into<T>,
-{
-    #[inline]
-    fn visit(&mut self, value: u64) -> Self::Output {
-        value.into()
-    }
-}
-
-impl<T> Visitor<u128> for UintEncoder<T>
-where
-    u128: Into<T>,
-{
-    #[inline]
-    fn visit(&mut self, value: u128) -> Self::Output {
-        value.into()
-    }
-}
+impl_visitor_uint_encoder!(u8, u16, u32, u64, u128);
 
 impl<T: Clone> Visitor<&T> for UintEncoder<T> {
     fn visit(&mut self, value: &T) -> Self::Output {
@@ -100,6 +78,9 @@ impl<T> Default for Identity<T> {
 
 impl<T> VisitorOutput for Identity<T> {
     type Output = T;
+
+    /// UintEncoder does not implement visit_static.
+    type StaticOutput = Infallible;
 }
 
 impl<T: Copy> Visitor<T> for Identity<T> {
