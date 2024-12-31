@@ -9,7 +9,7 @@ pub trait VisitorOutput {
 // TODO: Rename this to Encoder and remove the &mut on self? Revisit this after implementing proof
 // of knowledge with range tours.
 pub trait Visitor<T>: VisitorOutput {
-    fn visit(&mut self, value: &T) -> Self::Output;
+    fn visit(&mut self, value: T) -> Self::Output;
 }
 
 pub struct UintEncoder<T>(PhantomData<T>);
@@ -24,32 +24,59 @@ impl<T> VisitorOutput for UintEncoder<T> {
     type Output = T;
 }
 
-/// Private marker trait used to reduce boiler-plate;
-trait PrimitiveUint: Copy {}
-impl PrimitiveUint for u8 {}
-impl PrimitiveUint for u16 {}
-impl PrimitiveUint for u32 {}
-impl PrimitiveUint for u64 {}
-impl PrimitiveUint for u128 {}
-
-impl<Uint: PrimitiveUint + Into<T>, T> Visitor<Uint> for UintEncoder<T> {
+impl<T> Visitor<u8> for UintEncoder<T>
+where
+    u8: Into<T>,
+{
     #[inline]
-    fn visit(&mut self, value: &Uint) -> Self::Output {
-        (*value).into()
+    fn visit(&mut self, value: u8) -> Self::Output {
+        value.into()
     }
 }
 
-// NOTE: Implemented on the concrete type rather than over all T because T could include e.g. u64.
-// With specialization, it would be possible achieve this. Attempted to use autoref specialization
-// without success. See the article below for more information about autoref specialization.
-// http://lukaskalbertodt.github.io/2019/12/05/generalized-autoref-based-specialization.html
-//
-// A concrete consiquence of this is that UintEncoder cannot work for field types that this crate
-// does not explicitly add here. One solution to this would be provide a macro to quickly and
-// easily implement a uint encoder for the provided (field) type. Unclear on the value of this.
-impl Visitor<curve25519_dalek::Scalar> for UintEncoder<curve25519_dalek::Scalar> {
-    fn visit(&mut self, value: &curve25519_dalek::Scalar) -> Self::Output {
-        *value
+impl<T> Visitor<u16> for UintEncoder<T>
+where
+    u16: Into<T>,
+{
+    #[inline]
+    fn visit(&mut self, value: u16) -> Self::Output {
+        value.into()
+    }
+}
+
+impl<T> Visitor<u32> for UintEncoder<T>
+where
+    u32: Into<T>,
+{
+    #[inline]
+    fn visit(&mut self, value: u32) -> Self::Output {
+        value.into()
+    }
+}
+
+impl<T> Visitor<u64> for UintEncoder<T>
+where
+    u64: Into<T>,
+{
+    #[inline]
+    fn visit(&mut self, value: u64) -> Self::Output {
+        value.into()
+    }
+}
+
+impl<T> Visitor<u128> for UintEncoder<T>
+where
+    u128: Into<T>,
+{
+    #[inline]
+    fn visit(&mut self, value: u128) -> Self::Output {
+        value.into()
+    }
+}
+
+impl<T: Clone> Visitor<&T> for UintEncoder<T> {
+    fn visit(&mut self, value: &T) -> Self::Output {
+        value.clone()
     }
 }
 
@@ -75,7 +102,14 @@ impl<T> VisitorOutput for Identity<T> {
     type Output = T;
 }
 
-impl<T: Clone> Visitor<T> for Identity<T> {
+impl<T: Copy> Visitor<T> for Identity<T> {
+    #[inline]
+    fn visit(&mut self, value: T) -> Self::Output {
+        value
+    }
+}
+
+impl<T: Clone> Visitor<&T> for Identity<T> {
     #[inline]
     fn visit(&mut self, value: &T) -> Self::Output {
         value.clone()
