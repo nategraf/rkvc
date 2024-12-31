@@ -1,6 +1,7 @@
 //! Proof of knowledge for a Pederson commitment opening.
 //! NOTE: WIP module to be broken up.
 
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use curve25519_dalek::{RistrettoPoint, Scalar as RistrettoScalar};
