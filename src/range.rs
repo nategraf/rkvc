@@ -112,8 +112,18 @@ pub struct BulletPoK<Msg> {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProveError {
-    #[error("bulletproofs priving error: {0:?}")]
+    #[error("bulletproofs proving error: {0:?}")]
     BulletproofError(bulletproofs::ProofError),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum VerifyError {
+    #[error("bulletproofs verification error: {0:?}")]
+    BulletproofError(bulletproofs::ProofError),
+
+    #[error("schnorr proof verification error: {0:?}")]
+    ZkpError(lox_zkp::ProofError),
 }
 
 impl<Msg> PoK<RistrettoPoint, Msg>
@@ -129,14 +139,6 @@ where
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut prover = Prover::new(b"PoKConstraints", &mut transcript);
 
-        let iter = itertools::zip_eq(
-            itertools::zip_eq(
-                Msg::label_iter(),
-                msg.attribute_walk(RangeProofEncoder::default()),
-            ),
-            PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
-        );
-
         // Seperate generators are used to commit to the individual range-check values.
         let bulletproof_commit_gens = bulletproofs::PedersenGens::default();
 
@@ -149,6 +151,14 @@ where
         let (bulletproof_commit_b_blind_var, _) = prover.allocate_point(
             b"PoK::bulletproof_commit_b_blind",
             bulletproof_commit_gens.B_blinding,
+        );
+
+        let iter = itertools::zip_eq(
+            itertools::zip_eq(
+                Msg::label_iter(),
+                msg.attribute_walk(RangeProofEncoder::default()),
+            ),
+            PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );
 
         let mut opening_scalar_vars = Vec::new();
