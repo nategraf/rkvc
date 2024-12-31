@@ -58,8 +58,8 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
             let ident = f.ident.as_ref().unwrap();
             match f.ty {
                 Type::Path(ref p) => match is_primitive_type(p) {
-                    true => quote_spanned!(f.span() => #ident),
-                    false => quote_spanned!(f.span() => &#ident),
+                    true => quote_spanned!(f.span() => self.#ident),
+                    false => quote_spanned!(f.span() => &self.#ident),
                 },
                 _ => quote_spanned!(f.ty.span() => compile_error!("Only type paths are supported")),
             }
@@ -115,7 +115,7 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
             {
             fn elem_at(&self, i: usize, visitor: &mut V) -> Option<V::Output> {
                 match i {
-                    #(#indices => Some(visitor.visit(self.#visit_field_args)),)*
+                    #(#indices => Some(visitor.visit(#visit_field_args)),)*
                     _ => None,
                 }
             }

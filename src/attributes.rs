@@ -148,6 +148,7 @@ where
 
 #[cfg(test)]
 mod test {
+    use curve25519_dalek::Scalar;
     use rkvc_derive::Attributes;
 
     use super::{AttributeLabels, UintEncoder};
@@ -156,14 +157,20 @@ mod test {
     struct Example {
         foo: u64,
         bar: u32,
+        baz: Scalar,
     }
 
     #[test]
     fn zip_example() {
-        let example = Example { foo: 5, bar: 7 };
-        for (label, x) in
-            itertools::zip_eq(Example::label_iter(), UintEncoder::<u64>::encode(&example))
-        {
+        let example = Example {
+            foo: 5,
+            bar: 7,
+            baz: Scalar::from(8u64),
+        };
+        for (label, x) in itertools::zip_eq(
+            Example::label_iter(),
+            UintEncoder::<Scalar>::encode(&example),
+        ) {
             println!("{label}: {x:?}");
         }
     }
