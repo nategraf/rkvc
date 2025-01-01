@@ -119,6 +119,9 @@ pub enum ProveError {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum VerifyError {
+    #[error("malformed proof")]
+    MalformedProof,
+
     #[error("bulletproofs verification error: {0:?}")]
     BulletproofError(bulletproofs::ProofError),
 
@@ -142,17 +145,12 @@ where
         // Seperate generators are used to commit to the individual range-check values.
         let bulletproof_commit_gens = bulletproofs::PedersenGens::default();
 
-        // Allocate variables for the commit opening and linking of the range proof and commit,
-        // note that this is repeated with respect to the verifier.
+        // Allocate variables for the commit opening.
         // NOTE: Order of variable allocation effects the transcript.
         let (commit_var, _) = prover.allocate_point(b"PoK::commit", commit.elem);
-        let (bulletproof_commit_b_var, _) =
-            prover.allocate_point(b"PoK::bulletproof_commit_b", bulletproof_commit_gens.B);
-        let (bulletproof_commit_b_blind_var, _) = prover.allocate_point(
-            b"PoK::bulletproof_commit_b_blind",
-            bulletproof_commit_gens.B_blinding,
-        );
 
+        let mut opening_scalar_vars = Vec::new();
+        let mut opening_point_vars = Vec::new();
         let iter = itertools::zip_eq(
             itertools::zip_eq(
                 Msg::label_iter(),
@@ -160,42 +158,12 @@ where
             ),
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );
-
-        let mut opening_scalar_vars = Vec::new();
-        let mut opening_point_vars = Vec::new();
-        let mut linking_scalar_vars = Vec::new();
-        let mut linking_commit_vars = Vec::new();
-        let mut bulletproof_x_values = Vec::new();
-        let mut bulletproof_x_blinds = Vec::new();
-        let mut bits_max: Option<u32> = None;
-        for ((label, (x, bits)), g) in iter {
+        for ((label, (x, _)), g) in iter {
             // Add scalars to the Schnorr proof ensuring knowledge of an opening to the given commit.
             // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
             let x_var = prover.allocate_scalar(label.as_bytes(), x);
             opening_scalar_vars.push(x_var);
             opening_point_vars.push(prover.allocate_point(label.as_bytes(), g).0);
-
-            if let Some(bits) = bits {
-                // TODO: Enforce sub-range membership.
-                bits_max = Some(bits_max.map(|x| u32::max(x, bits)).unwrap_or(bits));
-
-                // Produce the commitment for the range-checked value that will go with the proof.
-                // TODO: Try again to use the transcript RNG here? It is challenging due to the
-                // fact that the transcript is immutably borrowed by the prover.
-                // TODO: Use a distinct label here for the allocate_scalar call.
-                let blind = RistrettoScalar::random(&mut rand::thread_rng());
-                let x_commit = bulletproof_commit_gens.commit(x, blind);
-
-                // Save the x and blind values to be used for the range proof.
-                bulletproof_x_values.push(x);
-                bulletproof_x_blinds.push(blind);
-
-                // Link the scalar used for the opening proof, to an opening proof for the Pederson
-                // commitment used by the range proof.
-                let blind_var = prover.allocate_scalar(label.as_bytes(), blind);
-                linking_scalar_vars.push((x_var, blind_var));
-                linking_commit_vars.push(prover.allocate_point(label.as_bytes(), x_commit).0);
-            }
         }
         opening_scalar_vars.push(prover.allocate_scalar(b"PoK::blind", blind));
         opening_point_vars.push(
@@ -211,19 +179,58 @@ where
         Self::constrain_commit(
             &mut prover,
             commit_var,
-            opening_scalar_vars,
+            opening_scalar_vars.clone(),
             opening_point_vars,
         );
-        // Populate constraints proving knowledge of an opening for the individual attribute commits.
-        for ((x_var, blind_var), x_commit_var) in
-            itertools::zip_eq(linking_scalar_vars, linking_commit_vars)
-        {
-            Self::constrain_commit(
-                &mut prover,
-                x_commit_var,
-                [x_var, blind_var],
-                [bulletproof_commit_b_var, bulletproof_commit_b_blind_var],
-            );
+
+        // Allocate variables for the linking of the commitment opening to the range proof.
+        let (bulletproof_commit_b_var, _) =
+            prover.allocate_point(b"PoK::bulletproof_commit_b", bulletproof_commit_gens.B);
+        let (bulletproof_commit_b_blind_var, _) = prover.allocate_point(
+            b"PoK::bulletproof_commit_b_blind",
+            bulletproof_commit_gens.B_blinding,
+        );
+
+        // Populate the constraints proving knowledge of an opening for the bulletproof value
+        // commitments, and their linkage to the main commitment.
+        let mut bulletproof_values = Vec::new();
+        let mut bulletproof_blinds = Vec::new();
+        let mut bits_max: Option<u32> = None;
+        let iter = itertools::zip_eq(
+            // NOTE: Last element in the vec is the blinding factor.
+            &opening_scalar_vars[..opening_scalar_vars.len() - 1],
+            itertools::zip_eq(
+                Msg::label_iter(),
+                msg.attribute_walk(RangeProofEncoder::default()),
+            ),
+        );
+        for (x_var, (label, (x, bits))) in iter {
+            if let Some(bits) = bits {
+                // TODO: Enforce sub-range membership.
+                bits_max = Some(bits_max.map(|x| u32::max(x, bits)).unwrap_or(bits));
+
+                // Produce the commitment for the range-checked value that will go with the proof.
+                // TODO: Try again to use the transcript RNG here? It is challenging due to the
+                // fact that the transcript is immutably borrowed by the prover.
+                // TODO: Use a distinct label here for the allocate_scalar call.
+                let blind = RistrettoScalar::random(&mut rand::thread_rng());
+                let x_commit = bulletproof_commit_gens.commit(x, blind);
+
+                // Save the x and blind values to be used for the range proof.
+                bulletproof_values.push((x, bits));
+                bulletproof_blinds.push(blind);
+
+                // Link the scalar used for the opening proof, to an opening proof for the Pederson
+                // commitment used by the range proof.
+                let blind_var = prover.allocate_scalar(label.as_bytes(), blind);
+                let x_commit_var = prover.allocate_point(label.as_bytes(), x_commit).0;
+                Self::constrain_commit(
+                    &mut prover,
+                    x_commit_var,
+                    [*x_var, blind_var],
+                    [bulletproof_commit_b_var, bulletproof_commit_b_blind_var],
+                );
+            }
         }
 
         // NOTE: Uses rand::thread_rng internally, in conmbination with witness data.
@@ -233,9 +240,9 @@ where
             .map(|bits_max| {
                 // Coerce the attribute scalars into u64s. This should always succeed unless there is
                 // an implementation error.
-                let x_values_u64 = bulletproof_x_values
+                let x_values_u64 = bulletproof_values
                     .into_iter()
-                    .map(|x| {
+                    .map(|(x, _)| {
                         let x_bytes = x.as_bytes();
                         assert_eq!(x_bytes[8..], [0u8; 24]);
                         u64::from_le_bytes(x_bytes[..8].try_into().unwrap())
@@ -250,7 +257,7 @@ where
                     &bulletproof_commit_gens,
                     &mut transcript,
                     &x_values_u64,
-                    &bulletproof_x_blinds,
+                    &bulletproof_blinds,
                     bits_max as usize,
                     &mut rand::thread_rng(),
                 )
@@ -275,36 +282,131 @@ where
     }
 
     pub fn verify(
-        proof: &SchnorrProof,
-        commit: &PedersonCommitment<RistrettoPoint, Msg>,
-    ) -> Result<(), lox_zkp::ProofError> {
+        proof: &BulletPoK<Msg>,
+        commit: &PedersonCommitment<CompressedRistretto, Msg>,
+    ) -> Result<(), VerifyError> {
         // TODO: Make these labels configurable / move transcript to arguments.
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut verifier = Verifier::new(b"PoKConstraints", &mut transcript);
 
+        // Seperate generators are used to commit to the individual range-check values.
+        let bulletproof_commit_gens = bulletproofs::PedersenGens::default();
+
+        // Allocate variables for the commit opening and linking of the range proof and commit,
+        // note that this is repeated with respect to the verifier.
+        // NOTE: Order of variable allocation effects the transcript.
+        let commit_var = verifier
+            .allocate_point(b"PoK::commit", commit.elem)
+            .map_err(VerifyError::ZkpError)?;
+
+        let mut opening_scalar_vars = Vec::new();
+        let mut opening_point_vars = Vec::new();
         let iter = itertools::zip_eq(
-            Msg::label_iter(),
+            itertools::zip_eq(
+                Msg::label_iter(),
+                Msg::attribute_type_walk(RangeProofEncoder::default()),
+            ),
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );
-
-        // Allocate all the variables, note that this is repeated with respect to the verifier.
-        // NOTE: Order of variable allocation effects the transcript.
-        let commit_var = verifier.allocate_point(b"PoK::commit", commit.elem.compress())?;
-        let mut msg_vars = Vec::new();
-        let mut gen_vars = Vec::new();
-        for (label, g) in iter {
+        for ((label, _), g) in iter {
+            // Add scalars to the Schnorr proof ensuring knowledge of an opening to the given commit.
             // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
-            msg_vars.push(verifier.allocate_scalar(label.as_bytes()));
-            gen_vars.push(verifier.allocate_point(label.as_bytes(), g.compress())?);
+            let x_var = verifier.allocate_scalar(label.as_bytes());
+            opening_scalar_vars.push(x_var);
+            opening_point_vars.push(
+                verifier
+                    .allocate_point(label.as_bytes(), g.compress())
+                    .map_err(VerifyError::ZkpError)?,
+            );
         }
-        msg_vars.push(verifier.allocate_scalar(b"PoK::blind"));
-        gen_vars.push(verifier.allocate_point(
-            b"PoK::blind_gen",
-            PedersonCommitment::<RistrettoPoint, Msg>::blind_generator().compress(),
-        )?);
+        opening_scalar_vars.push(verifier.allocate_scalar(b"PoK::blind"));
+        opening_point_vars.push(
+            verifier
+                .allocate_point(
+                    b"PoK::blind_gen",
+                    PedersonCommitment::<RistrettoPoint, Msg>::blind_generator().compress(),
+                )
+                .map_err(VerifyError::ZkpError)?,
+        );
 
-        Self::constrain_commit(&mut verifier, commit_var, msg_vars, gen_vars);
-        verifier.verify_compact(proof)
+        // Populate constraints proving knowledge of an opening for the message commit.
+        Self::constrain_commit(
+            &mut verifier,
+            commit_var,
+            opening_scalar_vars.clone(),
+            opening_point_vars,
+        );
+
+        let bulletproof_commit_b_var = verifier
+            .allocate_point(
+                b"PoK::bulletproof_commit_b",
+                bulletproof_commit_gens.B.compress(),
+            )
+            .map_err(VerifyError::ZkpError)?;
+        let bulletproof_commit_b_blind_var = verifier
+            .allocate_point(
+                b"PoK::bulletproof_commit_b_blind",
+                bulletproof_commit_gens.B_blinding.compress(),
+            )
+            .map_err(VerifyError::ZkpError)?;
+
+        // Populate the constraints proving knowledge of an opening for the bulletproof value
+        // commitments, and their linkage to the main commitment.
+        let mut bits_max: Option<u32> = None;
+        let iter = itertools::zip_eq(
+            proof.bulletproof_commits.iter(),
+            itertools::zip_eq(
+                &opening_scalar_vars[..opening_scalar_vars.len() - 1],
+                itertools::zip_eq(
+                    Msg::label_iter(),
+                    Msg::attribute_type_walk(RangeProofEncoder::default()),
+                ),
+            )
+            .filter(|(_, (_, bits))| bits.is_some()),
+        );
+        for (x_commit, (x_var, (label, bits))) in iter {
+            // Attributes with no bit constraints are filtered out in the iterator.
+            let bits = bits.unwrap();
+
+            // TODO: Enforce sub-range membership.
+            bits_max = Some(bits_max.map(|x| u32::max(x, bits)).unwrap_or(bits));
+
+            // Link the scalar used for the opening proof, to an opening proof for the Pederson
+            // commitment used by the range proof.
+            let blind_var = verifier.allocate_scalar(label.as_bytes());
+            let x_commit_var = verifier
+                .allocate_point(label.as_bytes(), *x_commit)
+                .map_err(VerifyError::ZkpError)?;
+            Self::constrain_commit(
+                &mut verifier,
+                x_commit_var,
+                [*x_var, blind_var],
+                [bulletproof_commit_b_var, bulletproof_commit_b_blind_var],
+            );
+        }
+
+        // NOTE: Uses rand::thread_rng internally, in conmbination with witness data.
+        verifier
+            .verify_compact(&proof.schnorr)
+            .map_err(VerifyError::ZkpError)?;
+        if let Some(bits_max) = bits_max {
+            let bulletproof = proof
+                .bulletproof
+                .as_ref()
+                .ok_or(VerifyError::MalformedProof)?;
+            bulletproof
+                .verify_multiple_with_rng(
+                    &BulletproofGens::new(bits_max as usize, proof.bulletproof_commits.len()),
+                    &bulletproof_commit_gens,
+                    &mut transcript,
+                    &proof.bulletproof_commits,
+                    bits_max as usize,
+                    &mut rand::thread_rng(),
+                )
+                .map_err(VerifyError::BulletproofError)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -313,7 +415,7 @@ mod test {
     use curve25519_dalek::{RistrettoPoint, Scalar};
     use rkvc_derive::Attributes;
 
-    use super::PoK;
+    use super::{PoK, VerifyError};
     use crate::pederson::PedersonCommitment;
 
     #[derive(Attributes)]
@@ -332,9 +434,9 @@ mod test {
             &example,
             &mut rand::thread_rng(),
         );
-        let proof = PoK::<RistrettoPoint, Example>::prove(&commit, &example, blind);
+        let proof = PoK::<RistrettoPoint, Example>::prove(&commit, &example, blind).unwrap();
 
-        PoK::<RistrettoPoint, Example>::verify(&proof, &commit).unwrap();
+        PoK::<RistrettoPoint, Example>::verify(&proof, &commit.compress()).unwrap();
     }
 
     #[test]
@@ -347,7 +449,7 @@ mod test {
             &example,
             &mut rand::thread_rng(),
         );
-        let proof = PoK::<RistrettoPoint, Example>::prove(&commit, &example, blind);
+        let proof = PoK::<RistrettoPoint, Example>::prove(&commit, &example, blind).unwrap();
 
         let bad_example = Example {
             a: Scalar::from(42u64),
@@ -355,8 +457,8 @@ mod test {
         };
         let bad_commit =
             PedersonCommitment::<RistrettoPoint, Example>::commit_with_blind(&bad_example, blind);
-        let Err(lox_zkp::ProofError::VerificationFailure) =
-            PoK::<RistrettoPoint, Example>::verify(&proof, &bad_commit)
+        let Err(VerifyError::ZkpError(lox_zkp::ProofError::VerificationFailure)) =
+            PoK::<RistrettoPoint, Example>::verify(&proof, &bad_commit.compress())
         else {
             panic!("verify did not fail with verification failure");
         };
