@@ -352,6 +352,7 @@ where
 
         // Populate the constraints proving knowledge of an opening for the bulletproof value
         // commitments, and their linkage to the main commitment.
+        // TODO: Aggregation requires a power of two, so padding will need to be added.
         let mut bits_max: Option<u32> = None;
         let iter = itertools::zip_eq(
             proof.bulletproof_commits.iter(),
@@ -421,14 +422,18 @@ mod test {
     #[derive(Attributes)]
     struct Example {
         a: Scalar,
-        b: Scalar,
+        b: u32,
+        c: u64,
+        //d: u8,
     }
 
     #[test]
     fn basic_success() {
         let example = Example {
             a: Scalar::from(42u64),
-            b: Scalar::from(5u64),
+            b: 5,
+            c: 6,
+            //d: 7,
         };
         let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
             &example,
@@ -443,7 +448,9 @@ mod test {
     fn basic_fail() {
         let example = Example {
             a: Scalar::from(42u64),
-            b: Scalar::from(5u64),
+            b: 5,
+            c: 6,
+            //d: 7,
         };
         let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
             &example,
@@ -453,7 +460,9 @@ mod test {
 
         let bad_example = Example {
             a: Scalar::from(42u64),
-            b: Scalar::from(6u64),
+            b: 5,
+            c: 7,
+            //d: 8,
         };
         let bad_commit =
             PedersonCommitment::<RistrettoPoint, Example>::commit_with_blind(&bad_example, blind);
