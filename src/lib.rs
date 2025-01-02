@@ -1,7 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-// TODO: This is required because the zkp crate uses alloc::Vec in it's SchnorrCS contraints API.
-// We would like to avoid allocation, to ease integration with WASM targets.
+// TODO: We would like to avoid allocation, to ease integration with WASM targets.
 extern crate alloc;
 
 pub mod attributes;

@@ -1,5 +1,10 @@
 use core::{borrow::BorrowMut, convert::Infallible, marker::PhantomData};
 
+use typenum::Unsigned;
+
+// Re-export typenum so that the derive macro has a stable path to it.
+pub use typenum;
+
 pub trait VisitorOutput {
     type Output;
 
@@ -109,10 +114,12 @@ impl<T> Identity<T> {
 
 // TODO: Combine these into one traits that returns (label, f) at each index?
 pub trait AttributeLabels: Sized {
+    type N: Unsigned;
+
     fn label_at(i: usize) -> Option<&'static str>;
 
-    fn label_iter() -> impl Iterator<Item = &'static str> {
-        (0..).map_while(move |i| Self::label_at(i))
+    fn label_iter() -> impl ExactSizeIterator<Item = &'static str> {
+        (0..Self::N::USIZE).map(move |i| Self::label_at(i).unwrap())
     }
 }
 
@@ -122,16 +129,19 @@ where
 {
     fn attribute_at(&self, i: usize, visitor: &mut V) -> Option<V::Output>;
 
-    fn attribute_walk(&self, mut visitor: impl BorrowMut<V>) -> impl Iterator<Item = V::Output> {
-        (0..).map_while(move |i| self.attribute_at(i, visitor.borrow_mut()))
+    fn attribute_walk(
+        &self,
+        mut visitor: impl BorrowMut<V>,
+    ) -> impl ExactSizeIterator<Item = V::Output> {
+        (0..Self::N::USIZE).map(move |i| self.attribute_at(i, visitor.borrow_mut()).unwrap())
     }
 
     fn attribute_type_at(i: usize, visitor: &mut V) -> Option<V::StaticOutput>;
 
     fn attribute_type_walk(
         mut visitor: impl BorrowMut<V>,
-    ) -> impl Iterator<Item = V::StaticOutput> {
-        (0..).map_while(move |i| Self::attribute_type_at(i, visitor.borrow_mut()))
+    ) -> impl ExactSizeIterator<Item = V::StaticOutput> {
+        (0..Self::N::USIZE).map(move |i| Self::attribute_type_at(i, visitor.borrow_mut()).unwrap())
     }
 }
 
