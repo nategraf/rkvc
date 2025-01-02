@@ -139,116 +139,111 @@ impl From<lox_zkp::ProofError> for VerifyError {
     }
 }
 
-// TODO: Refactor these alloc traits to be implementated on the Prover / Verifier struct rather
-// than the arguments that will be passed to add.
-trait AllocScalarVar<CS: SchnorrCS> {
+trait AllocScalarVar<T>: SchnorrCS {
     type Error;
 
-    fn alloc_scalar<'a>(self, cs: &'a mut CS) -> Result<CS::ScalarVar, Self::Error>;
+    fn alloc_scalar(&mut self, value: T) -> Result<Self::ScalarVar, Self::Error>;
 }
 
-impl AllocScalarVar<Prover<'_>> for (&'static str, RistrettoScalar) {
+impl AllocScalarVar<(&'static str, RistrettoScalar)> for Prover<'_> {
     type Error = Infallible;
 
-    fn alloc_scalar<'a>(
-        self,
-        cs: &'a mut Prover,
-    ) -> Result<<Prover<'a> as SchnorrCS>::ScalarVar, Self::Error> {
-        Ok(cs.allocate_scalar(self.0.as_bytes(), self.1))
+    fn alloc_scalar(
+        &mut self,
+        value: (&'static str, RistrettoScalar),
+    ) -> Result<Self::ScalarVar, Self::Error> {
+        Ok(self.allocate_scalar(value.0.as_bytes(), value.1))
     }
 }
 
-impl AllocScalarVar<Prover<'_>> for lox_zkp::toolbox::prover::ScalarVar {
+impl AllocScalarVar<lox_zkp::toolbox::prover::ScalarVar> for Prover<'_> {
     type Error = Infallible;
 
-    fn alloc_scalar<'a>(
-        self,
-        _: &'a mut Prover,
-    ) -> Result<<Prover<'a> as SchnorrCS>::ScalarVar, Self::Error> {
-        Ok(self)
+    fn alloc_scalar(
+        &mut self,
+        value: lox_zkp::toolbox::prover::ScalarVar,
+    ) -> Result<Self::ScalarVar, Self::Error> {
+        Ok(value)
     }
 }
 
-impl AllocScalarVar<Verifier<'_>> for &'static str {
+impl AllocScalarVar<&'static str> for Verifier<'_> {
     type Error = lox_zkp::ProofError;
 
-    fn alloc_scalar<'a>(
-        self,
-        cs: &'a mut Verifier,
-    ) -> Result<<Verifier<'a> as SchnorrCS>::ScalarVar, Self::Error> {
-        Ok(cs.allocate_scalar(self.as_bytes()))
+    fn alloc_scalar(&mut self, value: &'static str) -> Result<Self::ScalarVar, Self::Error> {
+        Ok(self.allocate_scalar(value.as_bytes()))
     }
 }
 
-impl AllocScalarVar<Verifier<'_>> for lox_zkp::toolbox::verifier::ScalarVar {
+impl AllocScalarVar<lox_zkp::toolbox::verifier::ScalarVar> for Verifier<'_> {
     type Error = lox_zkp::ProofError;
 
-    fn alloc_scalar<'a>(
-        self,
-        _: &'a mut Verifier,
-    ) -> Result<<Verifier<'a> as SchnorrCS>::ScalarVar, Self::Error> {
-        Ok(self)
+    fn alloc_scalar(
+        &mut self,
+        value: lox_zkp::toolbox::verifier::ScalarVar,
+    ) -> Result<Self::ScalarVar, Self::Error> {
+        Ok(value)
     }
 }
 
-trait AllocPointVar<CS: SchnorrCS> {
+trait AllocPointVar<T>: SchnorrCS {
     type Error;
 
-    fn alloc_point<'a>(self, cs: &'a mut CS) -> Result<CS::PointVar, Self::Error>;
+    fn alloc_point(&mut self, value: T) -> Result<Self::PointVar, Self::Error>;
 }
 
-impl AllocPointVar<Prover<'_>> for (&'static str, RistrettoPoint) {
+impl AllocPointVar<(&'static str, RistrettoPoint)> for Prover<'_> {
     type Error = Infallible;
 
-    fn alloc_point<'a>(
-        self,
-        cs: &'a mut Prover,
-    ) -> Result<<Prover<'a> as SchnorrCS>::PointVar, Self::Error> {
-        Ok(cs.allocate_point(self.0.as_bytes(), self.1).0)
+    fn alloc_point(
+        &mut self,
+        value: (&'static str, RistrettoPoint),
+    ) -> Result<Self::PointVar, Self::Error> {
+        Ok(self.allocate_point(value.0.as_bytes(), value.1).0)
     }
 }
 
-impl AllocPointVar<Prover<'_>> for lox_zkp::toolbox::prover::PointVar {
+impl AllocPointVar<lox_zkp::toolbox::prover::PointVar> for Prover<'_> {
     type Error = Infallible;
 
-    fn alloc_point<'a>(
-        self,
-        _: &'a mut Prover,
-    ) -> Result<<Prover<'a> as SchnorrCS>::PointVar, Self::Error> {
-        Ok(self)
+    fn alloc_point(
+        &mut self,
+        value: lox_zkp::toolbox::prover::PointVar,
+    ) -> Result<Self::PointVar, Self::Error> {
+        Ok(value)
     }
 }
 
-impl AllocPointVar<Verifier<'_>> for (&'static str, RistrettoPoint) {
+impl AllocPointVar<(&'static str, RistrettoPoint)> for Verifier<'_> {
     type Error = lox_zkp::ProofError;
 
-    fn alloc_point<'a>(
-        self,
-        cs: &'a mut Verifier,
-    ) -> Result<<Verifier<'a> as SchnorrCS>::PointVar, Self::Error> {
-        cs.allocate_point(self.0.as_bytes(), self.1.compress())
+    fn alloc_point(
+        &mut self,
+        value: (&'static str, RistrettoPoint),
+    ) -> Result<Self::PointVar, Self::Error> {
+        self.allocate_point(value.0.as_bytes(), value.1.compress())
     }
 }
 
-impl AllocPointVar<Verifier<'_>> for (&'static str, CompressedRistretto) {
+impl AllocPointVar<(&'static str, CompressedRistretto)> for Verifier<'_> {
     type Error = lox_zkp::ProofError;
 
-    fn alloc_point<'a>(
-        self,
-        cs: &'a mut Verifier,
-    ) -> Result<<Verifier<'a> as SchnorrCS>::PointVar, Self::Error> {
-        cs.allocate_point(self.0.as_bytes(), self.1)
+    fn alloc_point(
+        &mut self,
+        value: (&'static str, CompressedRistretto),
+    ) -> Result<Self::PointVar, Self::Error> {
+        self.allocate_point(value.0.as_bytes(), value.1)
     }
 }
 
-impl AllocPointVar<Verifier<'_>> for lox_zkp::toolbox::verifier::PointVar {
+impl AllocPointVar<lox_zkp::toolbox::verifier::PointVar> for Verifier<'_> {
     type Error = lox_zkp::ProofError;
 
-    fn alloc_point<'a>(
-        self,
-        _: &'a mut Verifier,
-    ) -> Result<<Verifier<'a> as SchnorrCS>::PointVar, Self::Error> {
-        Ok(self)
+    fn alloc_point(
+        &mut self,
+        value: lox_zkp::toolbox::verifier::PointVar,
+    ) -> Result<Self::PointVar, Self::Error> {
+        Ok(value)
     }
 }
 
@@ -262,52 +257,23 @@ impl<CS: SchnorrCS> Constraint<CS> {
             linear_combination: Vec::new(),
         }
     }
-}
 
-impl<'a> Constraint<Prover<'_>> {
-    fn add(
-        &mut self,
-        prover: &mut Prover<'a>,
-        x: impl AllocScalarVar<Prover<'a>, Error = Infallible>,
-        g: impl AllocPointVar<Prover<'a>, Error = Infallible>,
-    ) -> Result<(), Infallible> {
-        let x_var = x.alloc_scalar(prover)?;
-        let g_var = g.alloc_point(prover)?;
+    fn add<X, G, E>(&mut self, cs: &mut CS, x: X, g: G) -> Result<(), E>
+    where
+        CS: AllocScalarVar<X, Error = E> + AllocPointVar<G, Error = E>,
+    {
+        let x_var = cs.alloc_scalar(x)?;
+        let g_var = cs.alloc_point(g)?;
         self.linear_combination.push((x_var, g_var));
         Ok(())
     }
 
-    fn eq(
-        self,
-        prover: &mut Prover<'a>,
-        g: impl AllocPointVar<Prover<'a>, Error = Infallible>,
-    ) -> Result<(), Infallible> {
-        let g_var = g.alloc_point(prover)?;
-        prover.constrain(g_var, self.linear_combination);
-        Ok(())
-    }
-}
-
-impl<'a> Constraint<Verifier<'_>> {
-    fn add(
-        &mut self,
-        verifier: &mut Verifier<'a>,
-        x: impl AllocScalarVar<Verifier<'a>, Error = lox_zkp::ProofError>,
-        g: impl AllocPointVar<Verifier<'a>, Error = lox_zkp::ProofError>,
-    ) -> Result<(), lox_zkp::ProofError> {
-        let x_var = x.alloc_scalar(verifier)?;
-        let g_var = g.alloc_point(verifier)?;
-        self.linear_combination.push((x_var, g_var));
-        Ok(())
-    }
-
-    fn eq(
-        self,
-        verifier: &mut Verifier<'a>,
-        g: impl AllocPointVar<Verifier<'a>, Error = lox_zkp::ProofError>,
-    ) -> Result<(), lox_zkp::ProofError> {
-        let g_var = g.alloc_point(verifier)?;
-        verifier.constrain(g_var, self.linear_combination);
+    fn eq<G>(self, cs: &mut CS, g: G) -> Result<(), CS::Error>
+    where
+        CS: AllocPointVar<G>,
+    {
+        let g_var = cs.alloc_point(g)?;
+        cs.constrain(g_var, self.linear_combination);
         Ok(())
     }
 }
