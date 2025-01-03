@@ -135,7 +135,7 @@ where
         }
     }
 
-    pub fn verify(&self, msg: &Msg, mac: Mac<RistrettoPoint, Msg>) -> Result<(), Error> {
+    pub fn verify(&self, msg: &Msg, mac: &Mac<RistrettoPoint, Msg>) -> Result<(), Error> {
         let invalid_u = mac.u.is_identity();
         let v = mac.u.mul(
             self.0
@@ -143,7 +143,7 @@ where
                     .map(|(m, x)| m * x)
                     .sum::<RistrettoScalar>(),
         );
-        let invalid_v = mac.v.ct_eq(&v);
+        let invalid_v = !mac.v.ct_eq(&v);
         match (invalid_u | invalid_v).into() {
             true => Err(Error::VerificationError),
             false => Ok(()),
@@ -200,7 +200,7 @@ where
         let r: GenericArray<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
             .map(|_| RistrettoScalar::random(rng))
             .collect();
-        let commit_msg = itertools::zip_eq(Identity::encode(msg), r.as_slice())
+        let commit_msg = itertools::zip_eq(Identity::elem_iter(msg), r.as_slice())
             .map(|(m, r_i)| self.u.mul(m) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))
             .collect::<GenericArray<RistrettoPoint, Msg::N>>();
         let z = itertools::zip_eq(r.as_slice(), pp.1.as_slice())
@@ -247,7 +247,7 @@ where
         let u_var = prover.allocate_point(label!("u").as_bytes(), self.u).0;
 
         let iter = itertools::zip_eq(
-            itertools::zip_eq(Identity::encode(msg), r.as_slice()),
+            itertools::zip_eq(Identity::elem_iter(msg), r.as_slice()),
             itertools::zip_eq(commit_msg.as_slice(), pp.1.as_slice()),
         );
         for ((m_i, r_i), (c_i, x_i)) in iter {
@@ -264,5 +264,50 @@ where
         constraint_z.eq(&mut prover, (label!("z"), z))?;
 
         Ok(prover.prove_compact())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use curve25519_dalek::Scalar as RistrettoScalar;
+    use rkvc_derive::Attributes;
+
+    use super::{Error, Key};
+
+    #[derive(Attributes)]
+    struct Example {
+        a: u64,
+        b: RistrettoScalar,
+    }
+
+    #[test]
+    fn basic_mac_success() {
+        let example = Example {
+            a: 5,
+            b: 7u64.into(),
+        };
+
+        let key = Key::<RistrettoScalar, Example>::gen(&mut rand::thread_rng());
+        let mac = key.mac(&example);
+        key.verify(&example, &mac).unwrap();
+    }
+
+    #[test]
+    fn basic_mac_fail() {
+        let example = Example {
+            a: 5,
+            b: 7u64.into(),
+        };
+
+        let key = Key::<RistrettoScalar, Example>::gen(&mut rand::thread_rng());
+        let mac = key.mac(&example);
+
+        let bad_example = Example {
+            a: 6,
+            b: 7u64.into(),
+        };
+        let Err(Error::VerificationError) = key.verify(&bad_example, &mac) else {
+            panic!("mac verify of the wrong message succeeded");
+        };
     }
 }

@@ -1,5 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// TODO: Add proptests throughout for better coverage.
+
 // TODO: We would like to avoid allocation, to ease integration with WASM targets.
 extern crate alloc;
 
