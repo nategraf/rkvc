@@ -10,6 +10,7 @@ use curve25519_dalek::{
     Scalar as RistrettoScalar,
 };
 use ff::Field;
+use itertools::zip_eq;
 
 use crate::{
     attributes::{Attributes, Visitor, VisitorOutput},
@@ -156,8 +157,8 @@ where
         // NOTE: Order of variable allocation effects the transcript.
         let mut opening_constraint = Constraint::<Prover>::new();
         let mut attribute_vars: Vec<<Prover<'_> as SchnorrCS>::ScalarVar> = Vec::new();
-        let iter = itertools::zip_eq(
-            itertools::zip_eq(
+        let iter = zip_eq(
+            zip_eq(
                 Msg::label_iter(),
                 msg.attribute_walk(RangeProofEncoder::default()),
             ),
@@ -193,9 +194,9 @@ where
         let mut bulletproof_values = Vec::new();
         let mut bulletproof_blinds = Vec::new();
         let mut bits_max: Option<u32> = None;
-        let iter = itertools::zip_eq(
+        let iter = zip_eq(
             attribute_vars,
-            itertools::zip_eq(
+            zip_eq(
                 Msg::label_iter(),
                 msg.attribute_walk(RangeProofEncoder::default()),
             ),
@@ -287,8 +288,8 @@ where
         // NOTE: Order of variable allocation effects the transcript.
         let mut constraint = Constraint::<Verifier>::new();
         let mut x_vars = Vec::new();
-        let iter = itertools::zip_eq(
-            itertools::zip_eq(
+        let iter = zip_eq(
+            zip_eq(
                 Msg::label_iter(),
                 Msg::attribute_type_walk(RangeProofEncoder::default()),
             ),
@@ -323,11 +324,11 @@ where
         // commitments, and their linkage to the main commitment.
         // TODO: Aggregation requires a power of two, so padding will need to be added.
         let mut bits_max: Option<u32> = None;
-        let iter = itertools::zip_eq(
+        let iter = zip_eq(
             proof.bulletproof_commits.iter(),
-            itertools::zip_eq(
+            zip_eq(
                 x_vars,
-                itertools::zip_eq(
+                zip_eq(
                     Msg::label_iter(),
                     Msg::attribute_type_walk(RangeProofEncoder::default()),
                 ),

@@ -6,6 +6,7 @@ use core::marker::PhantomData;
 
 use curve25519_dalek::{RistrettoPoint, Scalar as RistrettoScalar};
 use group::Group;
+use itertools::zip_eq;
 use lox_zkp::{
     toolbox::{prover::Prover, verifier::Verifier, SchnorrCS},
     CompactProof, Transcript,
@@ -31,10 +32,7 @@ impl<G: Group, Msg> PoK<G, Msg> {
         msg_vars: impl IntoIterator<Item = CS::ScalarVar>,
         gen_vars: impl IntoIterator<Item = CS::PointVar>,
     ) {
-        cs.constrain(
-            commit,
-            itertools::zip_eq(msg_vars, gen_vars).collect::<Vec<_>>(),
-        );
+        cs.constrain(commit, zip_eq(msg_vars, gen_vars).collect::<Vec<_>>());
     }
 }
 
@@ -51,8 +49,8 @@ where
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut prover = Prover::new(b"PoKConstraints", &mut transcript);
 
-        let iter = itertools::zip_eq(
-            itertools::zip_eq(Msg::label_iter(), Identity::elem_iter(msg)),
+        let iter = zip_eq(
+            zip_eq(Msg::label_iter(), Identity::elem_iter(msg)),
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );
 
@@ -88,7 +86,7 @@ where
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut verifier = Verifier::new(b"PoKConstraints", &mut transcript);
 
-        let iter = itertools::zip_eq(
+        let iter = zip_eq(
             Msg::label_iter(),
             PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
         );

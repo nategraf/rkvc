@@ -16,6 +16,13 @@ pub trait AllocScalarVar<T>: SchnorrCS {
     type Error;
 
     fn alloc_scalar(&mut self, value: T) -> Result<Self::ScalarVar, Self::Error>;
+
+    fn alloc_scalars<I>(&mut self, values: impl IntoIterator<Item = T>) -> Result<I, Self::Error>
+    where
+        I: FromIterator<Self::ScalarVar>,
+    {
+        values.into_iter().map(|v| self.alloc_scalar(v)).collect()
+    }
 }
 
 impl AllocScalarVar<(&'static str, RistrettoScalar)> for Prover<'_> {
@@ -63,6 +70,13 @@ pub trait AllocPointVar<T>: SchnorrCS {
     type Error;
 
     fn alloc_point(&mut self, value: T) -> Result<Self::PointVar, Self::Error>;
+
+    fn alloc_points<I>(&mut self, values: impl IntoIterator<Item = T>) -> Result<I, Self::Error>
+    where
+        I: FromIterator<Self::PointVar>,
+    {
+        values.into_iter().map(|v| self.alloc_point(v)).collect()
+    }
 }
 
 impl AllocPointVar<(&'static str, RistrettoPoint)> for Prover<'_> {
@@ -138,6 +152,21 @@ impl<CS: SchnorrCS> Constraint<CS> {
         let x_var = cs.alloc_scalar(x)?;
         let g_var = cs.alloc_point(g)?;
         self.linear_combination.push((x_var, g_var));
+        Ok(())
+    }
+
+    pub fn sum<X, G, E>(
+        &mut self,
+        cs: &mut CS,
+        x_iter: impl IntoIterator<Item = X>,
+        g_iter: impl IntoIterator<Item = G>,
+    ) -> Result<(), E>
+    where
+        CS: AllocScalarVar<X, Error = E> + AllocPointVar<G, Error = E>,
+    {
+        for (x, g) in itertools::zip_eq(x_iter, g_iter) {
+            self.add(cs, x, g)?;
+        }
         Ok(())
     }
 

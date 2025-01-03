@@ -8,6 +8,7 @@ use curve25519_dalek::{
 };
 use generic_array::GenericArray;
 use group::{Group, GroupEncoding};
+use itertools::zip_eq;
 use rand_core::CryptoRngCore;
 use subtle::ConstantTimeEq;
 use typenum::Unsigned;
@@ -15,23 +16,31 @@ use typenum::Unsigned;
 use crate::{
     attributes::{AttributeCount, Attributes, Identity, UintEncoder},
     pederson::PedersonCommitment,
-    zkp::{CompactProof as SchnorrProof, Constraint, Prover, Transcript},
+    zkp::{
+        AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover,
+        Transcript, Verifier,
+    },
 };
 
+#[derive(Clone)]
 pub struct Key<F, Msg>(F, GenericArray<F, Msg::N>)
 where
     Msg: AttributeCount;
 
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct PublicParameters<G, Msg>(G, GenericArray<G, Msg::N>)
 where
     Msg: AttributeCount;
 
+#[derive(Debug, Clone)]
 pub struct Mac<G, Msg> {
     u: G,
     v: G,
     _phantom_msg: PhantomData<Msg>,
 }
 
+#[derive(Clone)]
 pub struct Presentation<G, Msg: AttributeCount>
 where
     Msg: AttributeCount,
@@ -46,7 +55,17 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("verification failed")]
-    VerificationError,
+    VerificationFailed,
+    #[error("decompress of a group element failed")]
+    DecompressFailed,
+    #[error("schnorr proof verification error: {0:?}")]
+    ZkpError(crate::zkp::ProofError),
+}
+
+impl From<crate::zkp::ProofError> for Error {
+    fn from(value: crate::zkp::ProofError) -> Self {
+        Error::ZkpError(value)
+    }
 }
 
 impl<Msg> Key<RistrettoScalar, Msg>
@@ -124,7 +143,7 @@ where
         let u_scalar = RistrettoScalar::from_hash(hasher);
         let v_scalar: RistrettoScalar = (&u_scalar).mul(
             self.0
-                + itertools::zip_eq(UintEncoder::encode(msg), self.1.iter())
+                + zip_eq(UintEncoder::encode(msg), self.1.iter())
                     .map(|(m, x)| m * x)
                     .sum::<RistrettoScalar>(),
         );
@@ -139,15 +158,80 @@ where
         let invalid_u = mac.u.is_identity();
         let v = mac.u.mul(
             self.0
-                + itertools::zip_eq(UintEncoder::encode(msg), self.1.iter())
+                + zip_eq(UintEncoder::encode(msg), self.1.iter())
                     .map(|(m, x)| m * x)
                     .sum::<RistrettoScalar>(),
         );
         let invalid_v = !mac.v.ct_eq(&v);
         match (invalid_u | invalid_v).into() {
-            true => Err(Error::VerificationError),
+            true => Err(Error::VerificationFailed),
             false => Ok(()),
         }
+    }
+}
+
+impl<Msg> Key<RistrettoScalar, Msg>
+where
+    Msg: Attributes<Identity<RistrettoScalar>>,
+{
+    pub fn verify_presentation(
+        &self,
+        pres: &Presentation<CompressedRistretto, Msg>,
+    ) -> Result<(), Error> {
+        let u = pres.u.decompress().ok_or(Error::DecompressFailed)?;
+        // NOTE: Unwrapping the CtChoice is ok here because U is non-private.
+        if u.is_identity().into() {
+            return Err(Error::VerificationFailed);
+        }
+        let commit_v = pres.commit_v.decompress().ok_or(Error::DecompressFailed)?;
+
+        // Calculate Z = x_0 * U + \Sigma_i x_i * C_i - C_v
+        let z = u.mul(self.0) - commit_v
+            + zip_eq(self.1.as_slice(), pres.commit_msg.as_slice())
+                .map(|(x_i, c_i)| {
+                    c_i.decompress()
+                        .ok_or(Error::DecompressFailed)
+                        .map(|c_i| c_i.mul(x_i))
+                })
+                .collect::<Result<GenericArray<_, Msg::N>, _>>()?
+                .into_iter()
+                .sum::<RistrettoPoint>();
+
+        verify_presentation(
+            &pres.proof,
+            pres.u,
+            z,
+            &self.public_parameters().compress(),
+            &pres.commit_msg,
+        )?;
+        Ok(())
+    }
+}
+
+impl<Msg> PublicParameters<RistrettoPoint, Msg>
+where
+    Msg: AttributeCount,
+{
+    pub fn compress(&self) -> PublicParameters<CompressedRistretto, Msg> {
+        PublicParameters(
+            self.0.compress(),
+            self.1.iter().map(|pp_i| pp_i.compress()).collect(),
+        )
+    }
+}
+
+impl<Msg> PublicParameters<CompressedRistretto, Msg>
+where
+    Msg: AttributeCount,
+{
+    pub fn decompress(&self) -> Option<PublicParameters<RistrettoPoint, Msg>> {
+        Some(PublicParameters(
+            self.0.decompress()?,
+            self.1
+                .iter()
+                .map(|pp_i| pp_i.decompress())
+                .collect::<Option<GenericArray<_, _>>>()?,
+        ))
     }
 }
 
@@ -200,19 +284,17 @@ where
         let r: GenericArray<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
             .map(|_| RistrettoScalar::random(rng))
             .collect();
-        let commit_msg = itertools::zip_eq(Identity::elem_iter(msg), r.as_slice())
+        let commit_msg = zip_eq(Identity::elem_iter(msg), r.as_slice())
             .map(|(m, r_i)| self.u.mul(m) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))
             .collect::<GenericArray<RistrettoPoint, Msg::N>>();
-        let z = itertools::zip_eq(r.as_slice(), pp.1.as_slice())
+        let z = zip_eq(r.as_slice(), pp.1.as_slice())
             .map(|(r_i, x_i)| x_i.mul(r_i))
             .sum::<RistrettoPoint>()
             - RISTRETTO_BASEPOINT_TABLE.mul(&r_v);
 
         // Produce a ZKP attesting to the knowledge of an opening for the committed values.
         // NOTE: Unwrap will never panic, prove_presentation is infallible.
-        let proof = self
-            .prove_presentation(r_v, z, r, msg, pp, &commit_msg)
-            .unwrap();
+        let proof = prove_presentation(self.u, r_v, z, r, msg, pp, &commit_msg).unwrap();
 
         Presentation {
             u: self.u.compress(),
@@ -221,50 +303,101 @@ where
             proof,
         }
     }
+}
 
-    fn prove_presentation(
-        &self,
-        r_v: RistrettoScalar,
-        z: RistrettoPoint,
-        r: GenericArray<RistrettoScalar, Msg::N>,
-        msg: &Msg,
-        pp: &PublicParameters<RistrettoPoint, Msg>,
-        commit_msg: &GenericArray<RistrettoPoint, Msg::N>,
-    ) -> Result<SchnorrProof, Infallible> {
-        // A small macro to construct the labels for variables that get added to the transcript.
-        macro_rules! label {
-            ($s:literal) => {
-                concat!("rkvc::cmz::Mac::presentation::", $s)
-            };
-        }
-        let mut transcript = Transcript::new(label!("transcript").as_bytes());
-        let mut prover = Prover::new(label!("prover").as_bytes(), &mut transcript);
-
-        let mut constraint_z = Constraint::new();
-        let g_var = prover
-            .allocate_point(label!("g").as_bytes(), RISTRETTO_BASEPOINT_POINT)
-            .0;
-        let u_var = prover.allocate_point(label!("u").as_bytes(), self.u).0;
-
-        let iter = itertools::zip_eq(
-            itertools::zip_eq(Identity::elem_iter(msg), r.as_slice()),
-            itertools::zip_eq(commit_msg.as_slice(), pp.1.as_slice()),
-        );
-        for ((m_i, r_i), (c_i, x_i)) in iter {
-            // TODO: Differentiate labels across loop iterations. Difficult with ZKP API as is.
-            let r_i_var = prover.allocate_scalar(label!("r_i").as_bytes(), *r_i);
-            constraint_z.add(&mut prover, r_i_var, (label!("x_i"), *x_i))?;
-
-            let mut constraint_c_i = Constraint::new();
-            constraint_c_i.add(&mut prover, (label!("m_i"), m_i), u_var)?;
-            constraint_c_i.add(&mut prover, r_i_var, g_var)?;
-            constraint_c_i.eq(&mut prover, (label!("c_i"), *c_i))?;
-        }
-        constraint_z.add(&mut prover, (label!("r_v"), -r_v), (label!("h"), pp.0))?;
-        constraint_z.eq(&mut prover, (label!("z"), z))?;
-
-        Ok(prover.prove_compact())
+fn verify_presentation<Msg: AttributeCount>(
+    proof: &SchnorrProof,
+    u: CompressedRistretto,
+    z: RistrettoPoint,
+    pp: &PublicParameters<CompressedRistretto, Msg>,
+    commit_msg: &GenericArray<CompressedRistretto, Msg::N>,
+) -> Result<(), crate::zkp::ProofError> {
+    // A small macro to construct the labels for variables that get added to the transcript.
+    macro_rules! label {
+        ($s:literal) => {
+            concat!("rkvc::cmz::Mac::presentation::", $s)
+        };
     }
+    let mut transcript = Transcript::new(label!("transcript").as_bytes());
+    let mut verifier = Verifier::new(label!("constraints").as_bytes(), &mut transcript);
+
+    // Allocate variables used in multiple constraint declarations.
+    let g_var = verifier.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
+    let u_var = verifier.alloc_point((label!("u"), u))?;
+    let r_vars: GenericArray<_, Msg::N> =
+        verifier.alloc_scalars((0..Msg::N::USIZE).map(|_| label!("r_i")))?;
+
+    // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
+    let mut constraint_z = Constraint::new();
+    constraint_z.sum(
+        &mut verifier,
+        r_vars.iter().copied(),
+        pp.1.iter().map(|pp_i| (label!("pp_i"), *pp_i)),
+    )?;
+    constraint_z.add(&mut verifier, label!("-r_v"), (label!("h"), pp.0))?;
+    constraint_z.eq(&mut verifier, (label!("z"), z))?;
+
+    // Constrain each C_i = m_i * U + r_i * G
+    for (r_i_var, c_i) in zip_eq(r_vars.as_slice(), commit_msg.as_slice()) {
+        let mut constraint_c_i = Constraint::new();
+        constraint_c_i.add(&mut verifier, label!("m_i"), u_var)?;
+        constraint_c_i.add(&mut verifier, *r_i_var, g_var)?;
+        constraint_c_i.eq(&mut verifier, (label!("c_i"), *c_i))?;
+    }
+
+    verifier.verify_compact(proof)
+}
+
+fn prove_presentation<Msg>(
+    u: RistrettoPoint,
+    r_v: RistrettoScalar,
+    z: RistrettoPoint,
+    r: GenericArray<RistrettoScalar, Msg::N>,
+    msg: &Msg,
+    pp: &PublicParameters<RistrettoPoint, Msg>,
+    commit_msg: &GenericArray<RistrettoPoint, Msg::N>,
+) -> Result<SchnorrProof, Infallible>
+where
+    Msg: Attributes<Identity<RistrettoScalar>>,
+{
+    // A small macro to construct the labels for variables that get added to the transcript.
+    macro_rules! label {
+        ($s:literal) => {
+            concat!("rkvc::cmz::Mac::presentation::", $s)
+        };
+    }
+    let mut transcript = Transcript::new(label!("transcript").as_bytes());
+    let mut prover = Prover::new(label!("constraints").as_bytes(), &mut transcript);
+
+    // Allocate variables used in multiple constraint declarations.
+    let g_var = prover.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
+    let u_var = prover.alloc_point((label!("u"), u))?;
+    let r_vars: GenericArray<_, Msg::N> =
+        prover.alloc_scalars(r.iter().map(|r_i| (label!("r_i"), *r_i)))?;
+
+    // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
+    let mut constraint_z = Constraint::new();
+    constraint_z.sum(
+        &mut prover,
+        r_vars.iter().copied(),
+        pp.1.iter().map(|pp_i| (label!("pp_i"), *pp_i)),
+    )?;
+    constraint_z.add(&mut prover, (label!("-r_v"), -r_v), (label!("h"), pp.0))?;
+    constraint_z.eq(&mut prover, (label!("z"), z))?;
+
+    // Constrain each C_i = m_i * U + r_i * G
+    let iter = zip_eq(
+        zip_eq(Identity::elem_iter(msg), r_vars.as_slice()),
+        commit_msg.as_slice(),
+    );
+    for ((m_i, r_i_var), c_i) in iter {
+        let mut constraint_c_i = Constraint::new();
+        constraint_c_i.add(&mut prover, (label!("m_i"), m_i), u_var)?;
+        constraint_c_i.add(&mut prover, *r_i_var, g_var)?;
+        constraint_c_i.eq(&mut prover, (label!("c_i"), *c_i))?;
+    }
+
+    Ok(prover.prove_compact())
 }
 
 #[cfg(test)]
@@ -273,41 +406,98 @@ mod test {
     use rkvc_derive::Attributes;
 
     use super::{Error, Key};
+    use crate::pederson::PedersonCommitment;
 
-    #[derive(Attributes)]
-    struct Example {
+    #[derive(Attributes, Debug, PartialEq, Eq)]
+    struct ExampleA {
         a: u64,
+        b: RistrettoScalar,
+    }
+
+    // Example B only has Scalars, which is required to provide a PoK without range check.
+    #[derive(Attributes, Debug, PartialEq, Eq)]
+    struct ExampleB {
+        a: RistrettoScalar,
         b: RistrettoScalar,
     }
 
     #[test]
     fn basic_mac_success() {
-        let example = Example {
+        let example = ExampleA {
             a: 5,
             b: 7u64.into(),
         };
 
-        let key = Key::<RistrettoScalar, Example>::gen(&mut rand::thread_rng());
+        let key = Key::<RistrettoScalar, ExampleA>::gen(&mut rand::thread_rng());
         let mac = key.mac(&example);
         key.verify(&example, &mac).unwrap();
     }
 
     #[test]
     fn basic_mac_fail() {
-        let example = Example {
+        let example = ExampleA {
             a: 5,
             b: 7u64.into(),
         };
 
-        let key = Key::<RistrettoScalar, Example>::gen(&mut rand::thread_rng());
+        let key = Key::<RistrettoScalar, ExampleA>::gen(&mut rand::thread_rng());
         let mac = key.mac(&example);
 
-        let bad_example = Example {
+        let bad_example = ExampleA {
             a: 6,
             b: 7u64.into(),
         };
-        let Err(Error::VerificationError) = key.verify(&bad_example, &mac) else {
+        let Err(Error::VerificationFailed) = key.verify(&bad_example, &mac) else {
             panic!("mac verify of the wrong message succeeded");
         };
+    }
+
+    #[test]
+    fn basic_blind_mac_success() {
+        let example = ExampleB {
+            a: 5u64.into(),
+            b: 7u64.into(),
+        };
+
+        let key = Key::<RistrettoScalar, ExampleB>::gen(&mut rand::thread_rng());
+
+        // Client creates a commitment, has the MAC generated over it, then removes the blind from
+        // the MAC. This should generate a MAC that is the same (except U) as a plaintext.
+        let (commit, blind) = PedersonCommitment::commit(&example, &mut rand::thread_rng());
+        let mut mac = key.blind_mac(&commit);
+        mac.remove_blind(blind);
+        mac.randomize(&mut rand::thread_rng());
+
+        // Ensure that the MAC verifies when given the plaintext message.
+        key.verify(&example, &mac).unwrap();
+        // Ensure that the MAC verifies when given a presentation.
+        let presentation = mac.present(&example, &key.public_parameters(), &mut rand::thread_rng());
+        key.verify_presentation(&presentation).unwrap();
+    }
+
+    #[test]
+    fn basic_blind_mac_fail() {
+        let example = ExampleA {
+            a: 5,
+            b: 7u64.into(),
+        };
+
+        let key = Key::<RistrettoScalar, ExampleA>::gen(&mut rand::thread_rng());
+        let mac = key.mac(&example);
+
+        let bad_example = ExampleA {
+            a: 6,
+            b: 7u64.into(),
+        };
+        let Err(Error::VerificationFailed) = key.verify(&bad_example, &mac) else {
+            panic!("mac verify of the wrong message succeeded");
+        };
+    }
+
+    #[test]
+    fn public_parameters_compress_decompress() {
+        let key = Key::<RistrettoScalar, ExampleA>::gen(&mut rand::thread_rng());
+        let pp = key.public_parameters();
+        assert_eq!(pp, pp.compress().decompress().unwrap());
     }
 }
