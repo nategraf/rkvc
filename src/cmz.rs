@@ -463,6 +463,7 @@ mod test {
 
         // Client creates a commitment, has the MAC generated over it, then removes the blind from
         // the MAC. This should generate a MAC that is the same (except U) as a plaintext.
+        // TODO: This needs to commit using the public_parameters.
         let (commit, blind) = PedersonCommitment::commit(&example, &mut rand::thread_rng());
         let mut mac = key.blind_mac(&commit);
         mac.remove_blind(blind);

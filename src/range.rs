@@ -14,7 +14,7 @@ use itertools::zip_eq;
 
 use crate::{
     attributes::{Attributes, Visitor, VisitorOutput},
-    pederson::PedersonCommitment,
+    pederson::{PedersonCommitment, PedersonGenerators},
     zkp::{CompactProof as SchnorrProof, Constraint, Prover, SchnorrCS, Transcript, Verifier},
 };
 
@@ -150,8 +150,10 @@ where
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut prover = Prover::new(b"PoKConstraints", &mut transcript);
 
-        // Seperate generators are used to commit to the individual range-check values.
+        // Seperate generators are used to commit to the individual range-check values because all
+        // values in a batched range check must be committed to using the same generators.
         let bulletproof_commit_gens = bulletproofs::PedersenGens::default();
+        let pederson_generators = PedersonGenerators::attributes_default::<Msg>();
 
         // Build out the constraints for proof of knowledge for the commit opening.
         // NOTE: Order of variable allocation effects the transcript.
@@ -162,22 +164,19 @@ where
                 Msg::label_iter(),
                 msg.attribute_walk(RangeProofEncoder::default()),
             ),
-            PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
+            pederson_generators.1.as_slice(),
         );
         for ((label, (x, _)), g) in iter {
             // Add scalars to the opening proof and save the variables to link to the range proof.
             // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
             let x_var = prover.allocate_scalar(label.as_bytes(), x);
             attribute_vars.push(x_var);
-            opening_constraint.add(&mut prover, x_var, (label, g))?;
+            opening_constraint.add(&mut prover, x_var, (label, *g))?;
         }
         opening_constraint.add(
             &mut prover,
             ("PoK::blind", blind),
-            (
-                "PoK::blind_gen",
-                PedersonCommitment::<RistrettoPoint, Msg>::blind_generator(),
-            ),
+            ("PoK::blind_gen", pederson_generators.0),
         )?;
         opening_constraint.eq(&mut prover, ("PoK::commit", commit.elem))?;
 
@@ -281,8 +280,10 @@ where
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut verifier = Verifier::new(b"PoKConstraints", &mut transcript);
 
-        // Seperate generators are used to commit to the individual range-check values.
+        // Seperate generators are used to commit to the individual range-check values because all
+        // values in a batched range check must be committed to using the same generators.
         let bulletproof_commit_gens = bulletproofs::PedersenGens::default();
+        let pederson_generators = PedersonGenerators::attributes_default::<Msg>().compress();
 
         // Build out the constraints for proof of knowledge for the commit opening.
         // NOTE: Order of variable allocation effects the transcript.
@@ -293,21 +294,18 @@ where
                 Msg::label_iter(),
                 Msg::attribute_type_walk(RangeProofEncoder::default()),
             ),
-            PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
+            pederson_generators.1.as_slice(),
         );
         for ((label, _), g) in iter {
             // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
             let x_var = verifier.allocate_scalar(label.as_bytes());
             x_vars.push(x_var);
-            constraint.add(&mut verifier, x_var, (label, g))?;
+            constraint.add(&mut verifier, x_var, (label, *g))?;
         }
         constraint.add(
             &mut verifier,
             "PoK::blind",
-            (
-                "PoK::blind_gen",
-                PedersonCommitment::<RistrettoPoint, Msg>::blind_generator().compress(),
-            ),
+            ("PoK::blind_gen", pederson_generators.0),
         )?;
         constraint.eq(&mut verifier, ("PoK::commit", commit.elem))?;
 

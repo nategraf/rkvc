@@ -71,6 +71,7 @@ pub trait AllocPointVar<T>: SchnorrCS {
 
     fn alloc_point(&mut self, value: T) -> Result<Self::PointVar, Self::Error>;
 
+    #[allow(dead_code)]
     fn alloc_points<I>(&mut self, values: impl IntoIterator<Item = T>) -> Result<I, Self::Error>
     where
         I: FromIterator<Self::PointVar>,

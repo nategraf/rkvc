@@ -14,7 +14,7 @@ use lox_zkp::{
 
 use crate::{
     attributes::{Attributes, Identity},
-    pederson::PedersonCommitment,
+    pederson::{PedersonCommitment, PedersonGenerators},
 };
 
 pub struct PoK<G: Group, Msg>(PhantomData<G>, PhantomData<Msg>);
@@ -49,9 +49,10 @@ where
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut prover = Prover::new(b"PoKConstraints", &mut transcript);
 
+        let pederson_generators = PedersonGenerators::attributes_default::<Msg>();
         let iter = zip_eq(
             zip_eq(Msg::label_iter(), Identity::elem_iter(msg)),
-            PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
+            pederson_generators.1.as_slice(),
         );
 
         // Allocate all the variables, note that this is repeated with respect to the verifier.
@@ -62,15 +63,12 @@ where
         for ((label, x), g) in iter {
             // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
             msg_vars.push(prover.allocate_scalar(label.as_bytes(), x));
-            gen_vars.push(prover.allocate_point(label.as_bytes(), g).0);
+            gen_vars.push(prover.allocate_point(label.as_bytes(), *g).0);
         }
         msg_vars.push(prover.allocate_scalar(b"PoK::blind", blind));
         gen_vars.push(
             prover
-                .allocate_point(
-                    b"PoK::blind_gen",
-                    PedersonCommitment::<RistrettoPoint, Msg>::blind_generator(),
-                )
+                .allocate_point(b"PoK::blind_gen", pederson_generators.0)
                 .0,
         );
 
@@ -86,10 +84,8 @@ where
         let mut transcript = Transcript::new(b"PoKTranscript");
         let mut verifier = Verifier::new(b"PoKConstraints", &mut transcript);
 
-        let iter = zip_eq(
-            Msg::label_iter(),
-            PedersonCommitment::<RistrettoPoint, Msg>::attribute_generators(),
-        );
+        let pederson_generators = PedersonGenerators::attributes_default::<Msg>().compress();
+        let iter = zip_eq(Msg::label_iter(), pederson_generators.1.as_slice());
 
         // Allocate all the variables, note that this is repeated with respect to the verifier.
         // NOTE: Order of variable allocation effects the transcript.
@@ -99,13 +95,10 @@ where
         for (label, g) in iter {
             // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
             msg_vars.push(verifier.allocate_scalar(label.as_bytes()));
-            gen_vars.push(verifier.allocate_point(label.as_bytes(), g.compress())?);
+            gen_vars.push(verifier.allocate_point(label.as_bytes(), *g)?);
         }
         msg_vars.push(verifier.allocate_scalar(b"PoK::blind"));
-        gen_vars.push(verifier.allocate_point(
-            b"PoK::blind_gen",
-            PedersonCommitment::<RistrettoPoint, Msg>::blind_generator().compress(),
-        )?);
+        gen_vars.push(verifier.allocate_point(b"PoK::blind_gen", pederson_generators.0)?);
 
         Self::constrain(&mut verifier, commit_var, msg_vars, gen_vars);
         verifier.verify_compact(proof)
