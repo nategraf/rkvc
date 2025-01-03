@@ -5,7 +5,12 @@ use curve25519_dalek::{
     ristretto::{CompressedRistretto, RistrettoPoint},
     Scalar as RistrettoScalar,
 };
-use lox_zkp::toolbox::{prover::Prover, verifier::Verifier, SchnorrCS};
+
+// Re-export the core types for use in other modules.
+pub use lox_zkp::{
+    toolbox::{prover::Prover, verifier::Verifier, SchnorrCS},
+    CompactProof, ProofError, Transcript,
+};
 
 pub trait AllocScalarVar<T>: SchnorrCS {
     type Error;

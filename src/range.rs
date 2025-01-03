@@ -10,15 +10,11 @@ use curve25519_dalek::{
     Scalar as RistrettoScalar,
 };
 use ff::Field;
-use lox_zkp::{
-    toolbox::{prover::Prover, verifier::Verifier, SchnorrCS},
-    CompactProof as SchnorrProof, Transcript,
-};
 
 use crate::{
     attributes::{Attributes, Visitor, VisitorOutput},
     pederson::PedersonCommitment,
-    zkp::Constraint,
+    zkp::{CompactProof as SchnorrProof, Constraint, Prover, SchnorrCS, Transcript, Verifier},
 };
 
 pub struct RangeProofEncoder<F: Field>(PhantomData<F>);
@@ -119,7 +115,7 @@ pub enum VerifyError {
     BulletproofError(bulletproofs::ProofError),
 
     #[error("schnorr proof verification error: {0:?}")]
-    ZkpError(lox_zkp::ProofError),
+    ZkpError(crate::zkp::ProofError),
 }
 
 impl From<Infallible> for VerifyError {
@@ -134,8 +130,8 @@ impl From<bulletproofs::ProofError> for VerifyError {
     }
 }
 
-impl From<lox_zkp::ProofError> for VerifyError {
-    fn from(value: lox_zkp::ProofError) -> Self {
+impl From<crate::zkp::ProofError> for VerifyError {
+    fn from(value: crate::zkp::ProofError) -> Self {
         VerifyError::ZkpError(value)
     }
 }
@@ -429,7 +425,7 @@ mod test {
         };
         let bad_commit =
             PedersonCommitment::<RistrettoPoint, Example>::commit_with_blind(&bad_example, blind);
-        let Err(VerifyError::ZkpError(lox_zkp::ProofError::VerificationFailure)) =
+        let Err(VerifyError::ZkpError(crate::zkp::ProofError::VerificationFailure)) =
             PoK::<RistrettoPoint, Example>::verify(&proof, &bad_commit.compress())
         else {
             panic!("verify did not fail with verification failure");
