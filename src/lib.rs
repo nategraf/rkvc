@@ -4,7 +4,7 @@
 extern crate alloc;
 
 pub mod attributes;
-pub use attributes::{AttributeLabels, Attributes, UintEncoder};
+pub use attributes::{AttributeCount, AttributeLabels, Attributes, UintEncoder};
 
 pub mod hash;
 pub mod pederson;

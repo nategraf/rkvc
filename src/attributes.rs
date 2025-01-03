@@ -112,10 +112,11 @@ impl<T> Identity<T> {
     }
 }
 
-// TODO: Combine these into one traits that returns (label, f) at each index?
-pub trait AttributeLabels: Sized {
+pub trait AttributeCount {
     type N: Unsigned;
+}
 
+pub trait AttributeLabels: AttributeCount {
     fn label_at(i: usize) -> Option<&'static str>;
 
     fn label_iter() -> impl ExactSizeIterator<Item = &'static str> {

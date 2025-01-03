@@ -122,11 +122,12 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
 
     let attribute_count = fields.len();
 
-    // Generate the Labels implementation
-    let labels_impl = quote! {
-        impl #rkvc_path::AttributeLabels for #struct_name {
+    quote! {
+        impl #rkvc_path::AttributeCount for #struct_name {
             type N = #rkvc_path::attributes::typenum::U::<#attribute_count>;
+        }
 
+        impl #rkvc_path::AttributeLabels for #struct_name {
             fn label_at(i: usize) -> Option<&'static str> {
                 match i {
                     #(#indices => Some(#field_labels),)*
@@ -134,10 +135,7 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
                 }
             }
         }
-    };
 
-    // Generate the Elems implementation
-    let attr_impl = quote! {
         impl<V> #rkvc_path::Attributes<V> for #struct_name
         where
             V: #rkvc_path::attributes::VisitorOutput,
@@ -157,11 +155,5 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
                 }
             }
         }
-    };
-
-    quote! {
-        #labels_impl
-        #attr_impl
-    }
-    .into()
+    }.into()
 }
