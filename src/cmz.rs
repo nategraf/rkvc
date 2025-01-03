@@ -13,7 +13,7 @@ use subtle::ConstantTimeEq;
 use typenum::Unsigned;
 
 use crate::{
-    attributes::{AttributeCount, Attributes, UintEncoder},
+    attributes::{AttributeCount, Attributes, Identity, UintEncoder},
     pederson::PedersonCommitment,
     zkp::{CompactProof as SchnorrProof, Constraint, Prover, Transcript},
 };
@@ -177,7 +177,7 @@ where
 
 impl<Msg> Mac<RistrettoPoint, Msg>
 where
-    Msg: Attributes<UintEncoder<RistrettoScalar>>,
+    Msg: Attributes<Identity<RistrettoScalar>>,
 {
     /// Creates a hiding (i.e. zero-knowledge) presentation of the MAC that can be verified by the
     /// issuer to ensure that the presenter has knowledge of a valid MAC, without learning anything
@@ -200,7 +200,7 @@ where
         let r: GenericArray<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
             .map(|_| RistrettoScalar::random(rng))
             .collect();
-        let commit_msg = itertools::zip_eq(UintEncoder::encode(msg), r.as_slice())
+        let commit_msg = itertools::zip_eq(Identity::encode(msg), r.as_slice())
             .map(|(m, r_i)| self.u.mul(m) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))
             .collect::<GenericArray<RistrettoPoint, Msg::N>>();
         let z = itertools::zip_eq(r.as_slice(), pp.1.as_slice())
@@ -231,46 +231,38 @@ where
         pp: &PublicParameters<RistrettoPoint, Msg>,
         commit_msg: &GenericArray<RistrettoPoint, Msg::N>,
     ) -> Result<SchnorrProof, Infallible> {
-        let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
-        let mut prover = Prover::new(b"rkvc::cmz::Mac::presentation::prover", &mut transcript);
+        // A small macro to construct the labels for variables that get added to the transcript.
+        macro_rules! label {
+            ($s:literal) => {
+                concat!("rkvc::cmz::Mac::presentation::", $s)
+            };
+        }
+        let mut transcript = Transcript::new(label!("transcript").as_bytes());
+        let mut prover = Prover::new(label!("prover").as_bytes(), &mut transcript);
+
         let mut constraint_z = Constraint::new();
         let g_var = prover
-            .allocate_point(
-                b"rkvc::cmz::Mac::presentation::g",
-                RISTRETTO_BASEPOINT_POINT,
-            )
+            .allocate_point(label!("g").as_bytes(), RISTRETTO_BASEPOINT_POINT)
             .0;
-        let u_var = prover
-            .allocate_point(b"rkvc::cmz::Mac::presentation::u", self.u)
-            .0;
+        let u_var = prover.allocate_point(label!("u").as_bytes(), self.u).0;
+
         let iter = itertools::zip_eq(
-            itertools::zip_eq(UintEncoder::encode(msg), r.as_slice()),
+            itertools::zip_eq(Identity::encode(msg), r.as_slice()),
             itertools::zip_eq(commit_msg.as_slice(), pp.1.as_slice()),
         );
         for ((m_i, r_i), (c_i, x_i)) in iter {
-            // TODO: Differentiate labels across loop iterations.
-            let r_i_var = prover.allocate_scalar(b"rkvc::cmz::Mac::presentation::r_i", *r_i);
-            constraint_z.add(
-                &mut prover,
-                r_i_var,
-                ("rkvc::cmz::Mac::presentation::x_i", *x_i),
-            )?;
+            // TODO: Differentiate labels across loop iterations. Difficult with ZKP API as is.
+            let r_i_var = prover.allocate_scalar(label!("r_i").as_bytes(), *r_i);
+            constraint_z.add(&mut prover, r_i_var, (label!("x_i"), *x_i))?;
 
             let mut constraint_c_i = Constraint::new();
-            constraint_c_i.add(
-                &mut prover,
-                ("rkvc::cmz::Mac::presentation::m_i", m_i),
-                u_var,
-            )?;
+            constraint_c_i.add(&mut prover, (label!("m_i"), m_i), u_var)?;
             constraint_c_i.add(&mut prover, r_i_var, g_var)?;
-            constraint_c_i.eq(&mut prover, ("rkvc::cmz::Mac::presentation::c_i", *c_i))?;
+            constraint_c_i.eq(&mut prover, (label!("c_i"), *c_i))?;
         }
-        constraint_z.add(
-            &mut prover,
-            ("rkvc::cmz::Mac::presentation::r_v", -r_v),
-            ("rkvc::cmz::Mac::presentation::h", pp.0),
-        )?;
-        constraint_z.eq(&mut prover, ("rkvc::cmz::Mac::presentation::z", z))?;
+        constraint_z.add(&mut prover, (label!("r_v"), -r_v), (label!("h"), pp.0))?;
+        constraint_z.eq(&mut prover, (label!("z"), z))?;
+
         Ok(prover.prove_compact())
     }
 }
