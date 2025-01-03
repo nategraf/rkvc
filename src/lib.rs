@@ -14,6 +14,8 @@ pub(crate) mod zkp;
 pub mod pok;
 pub mod range;
 
+pub mod cmz;
+
 use rand_core::CryptoRng;
 
 pub trait Commitment {

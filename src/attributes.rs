@@ -1,5 +1,6 @@
 use core::{borrow::BorrowMut, convert::Infallible, marker::PhantomData};
 
+use generic_array::ArrayLength;
 use typenum::Unsigned;
 
 // Re-export typenum so that the derive macro has a stable path to it.
@@ -113,7 +114,7 @@ impl<T> Identity<T> {
 }
 
 pub trait AttributeCount {
-    type N: Unsigned;
+    type N: ArrayLength;
 }
 
 pub trait AttributeLabels: AttributeCount {

@@ -32,8 +32,7 @@ pub enum PedersonCommitmentError {
 // TODO: Make a way to precalculate the generators, including compressed versions.
 impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeLabels> PedersonCommitment<G, Msg> {
     pub fn blind_generator() -> G {
-        // TODO: Make this configurable?
-        G::hash_from_bytes::<Blake2b512>(b"PEDERSON_COMMIT_BLIND")
+        G::hash_from_bytes::<Blake2b512>(b"rkvc::pederson::PedersonCommitment::blind_generator")
     }
 
     pub fn attribute_generators() -> impl Iterator<Item = G> {
