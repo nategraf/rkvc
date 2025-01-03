@@ -15,7 +15,7 @@ use typenum::Unsigned;
 
 use crate::{
     attributes::{AttributeCount, Attributes, Identity, UintEncoder},
-    pederson::PedersonCommitment,
+    pederson::{PedersonCommitment, PedersonGenerators},
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover,
         Transcript, Verifier,
@@ -235,6 +235,19 @@ where
     }
 }
 
+impl<G, Msg> From<PublicParameters<G, Msg>> for PedersonGenerators<G, Msg::N>
+where
+    Msg: AttributeCount,
+    G: Group,
+{
+    fn from(value: PublicParameters<G, Msg>) -> Self {
+        // NOTE: We use the group generator here as the blind generator as a requirement to then be
+        // able to remove the blinding from the final MAC. Without this, the blinding factor for a
+        // commit would need to be carried as part of the MAC.
+        Self(G::generator(), value.1)
+    }
+}
+
 impl<Msg> Mac<RistrettoPoint, Msg>
 where
     Msg: AttributeCount,
@@ -406,16 +419,16 @@ mod test {
     use rkvc_derive::Attributes;
 
     use super::{Error, Key};
-    use crate::pederson::PedersonCommitment;
+    use crate::pederson::PedersonGenerators;
 
-    #[derive(Attributes, Debug, PartialEq, Eq)]
+    #[derive(Attributes, Clone, Debug, PartialEq, Eq)]
     struct ExampleA {
         a: u64,
         b: RistrettoScalar,
     }
 
     // Example B only has Scalars, which is required to provide a PoK without range check.
-    #[derive(Attributes, Debug, PartialEq, Eq)]
+    #[derive(Attributes, Clone, Debug, PartialEq, Eq)]
     struct ExampleB {
         a: RistrettoScalar,
         b: RistrettoScalar,
@@ -460,11 +473,13 @@ mod test {
         };
 
         let key = Key::<RistrettoScalar, ExampleB>::gen(&mut rand::thread_rng());
+        let pp = key.public_parameters();
 
         // Client creates a commitment, has the MAC generated over it, then removes the blind from
         // the MAC. This should generate a MAC that is the same (except U) as a plaintext.
         // TODO: This needs to commit using the public_parameters.
-        let (commit, blind) = PedersonCommitment::commit(&example, &mut rand::thread_rng());
+        let (commit, blind) =
+            PedersonGenerators::from(pp.clone()).commit(&example, &mut rand::thread_rng());
         let mut mac = key.blind_mac(&commit);
         mac.remove_blind(blind);
         mac.randomize(&mut rand::thread_rng());
