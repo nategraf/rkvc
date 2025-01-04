@@ -61,27 +61,6 @@ impl<G: Group + FromHash<OutputSize = U64>, N: ArrayLength> PedersonGenerators<G
 }
 
 impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
-    pub fn compress(&self) -> PedersonGenerators<CompressedRistretto, N> {
-        PedersonGenerators(
-            self.0.compress(),
-            self.1.iter().map(|g| g.compress()).collect(),
-        )
-    }
-}
-
-impl<N: ArrayLength> PedersonGenerators<CompressedRistretto, N> {
-    pub fn decompress(&self) -> Option<PedersonGenerators<RistrettoPoint, N>> {
-        Some(PedersonGenerators(
-            self.0.decompress()?,
-            self.1
-                .iter()
-                .map(|g| g.decompress())
-                .collect::<Option<GenericArray<_, _>>>()?,
-        ))
-    }
-}
-
-impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
     pub fn commit_with_blind<Msg>(
         &self,
         msg: &Msg,
@@ -133,6 +112,27 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
             true => Ok(()),
             false => Err(PedersonError::VerificationError),
         }
+    }
+}
+
+impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
+    pub fn compress(&self) -> PedersonGenerators<CompressedRistretto, N> {
+        PedersonGenerators(
+            self.0.compress(),
+            self.1.iter().map(|g| g.compress()).collect(),
+        )
+    }
+}
+
+impl<N: ArrayLength> PedersonGenerators<CompressedRistretto, N> {
+    pub fn decompress(&self) -> Option<PedersonGenerators<RistrettoPoint, N>> {
+        Some(PedersonGenerators(
+            self.0.decompress()?,
+            self.1
+                .iter()
+                .map(|g| g.decompress())
+                .collect::<Option<GenericArray<_, _>>>()?,
+        ))
     }
 }
 
