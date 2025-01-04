@@ -45,10 +45,9 @@ pub struct Presentation<G, Msg: AttributeCount>
 where
     Msg: AttributeCount,
 {
-    u: G,
-    commit_v: G,
-    commit_msg: GenericArray<G, Msg::N>,
-    proof: SchnorrProof,
+    pub u: G,
+    pub commit_v: G,
+    pub commit_msg: GenericArray<G, Msg::N>,
 }
 
 #[non_exhaustive]
@@ -179,11 +178,17 @@ where
     // on a secret value (e.g. subtracting 1 from a quota). Fields that are not modified can be
     // assumed to be in range by the fact that they were checked at issuance, either with a range
     // proof of because the fields were set by the issuer.
+    //
+    // Perhaps I should return a commitment here, as an indication that they should be checking
+    // this commitment. Main issue with this is that the presentation includes a SchnorrProof and
+    // already, and doing anything useful with the commit would require further binding it. Maybe I
+    // remove the Schnorr proof from the presentation 🤔
     Msg: Attributes<Identity<RistrettoScalar>>,
 {
     pub fn verify_presentation(
         &self,
         pres: &Presentation<CompressedRistretto, Msg>,
+        proof: &SchnorrProof,
     ) -> Result<(), Error> {
         let u = pres.u.decompress().ok_or(Error::DecompressFailed)?;
         // NOTE: Unwrapping the CtChoice is ok here because U is non-private.
@@ -205,7 +210,7 @@ where
                 .sum::<RistrettoPoint>();
 
         verify_presentation(
-            &pres.proof,
+            proof,
             pres.u,
             z,
             &self.public_parameters().compress(),
@@ -300,7 +305,7 @@ where
         msg: &Msg,
         pp: &PublicParameters<RistrettoPoint, Msg>,
         rng: &mut R,
-    ) -> Presentation<CompressedRistretto, Msg>
+    ) -> (Presentation<CompressedRistretto, Msg>, SchnorrProof)
     where
         R: CryptoRngCore + ?Sized,
     {
@@ -336,12 +341,14 @@ where
         )
         .unwrap();
 
-        Presentation {
-            u: self.u.compress(),
-            commit_v: commit_v.compress(),
-            commit_msg: commit_msg.iter().map(|c| c.compress()).collect(),
+        (
+            Presentation {
+                u: self.u.compress(),
+                commit_v: commit_v.compress(),
+                commit_msg: commit_msg.iter().map(|c| c.compress()).collect(),
+            },
             proof,
-        }
+        )
     }
 }
 
@@ -524,8 +531,9 @@ mod test {
         // Ensure that the MAC verifies when given the plaintext message.
         key.verify(&example, &mac).unwrap();
         // Ensure that the MAC verifies when given a presentation.
-        let presentation = mac.present(&example, &key.public_parameters(), &mut rand::thread_rng());
-        key.verify_presentation(&presentation).unwrap();
+        let (presentation, proof) =
+            mac.present(&example, &key.public_parameters(), &mut rand::thread_rng());
+        key.verify_presentation(&presentation, &proof).unwrap();
     }
 
     #[test]
@@ -558,9 +566,10 @@ mod test {
         };
 
         // Ensure that the MAC presentation fails to verify with a different key.
-        let presentation = mac.present(&example, &key.public_parameters(), &mut rand::thread_rng());
+        let (presentation, proof) =
+            mac.present(&example, &key.public_parameters(), &mut rand::thread_rng());
         let Err(Error::VerificationFailed | Error::ZkpError(_)) =
-            other_key.verify_presentation(&presentation)
+            other_key.verify_presentation(&presentation, &proof)
         else {
             panic!("mac presentation verify with the wrong key succeeded");
         };
