@@ -167,6 +167,18 @@ where
 
 impl<Msg> Key<RistrettoScalar, Msg>
 where
+    // NOTE: Requiring the message to be encodable with the Identity encoder restricts to messages
+    // that only contain the group scalar field elements (and not e.g. u64), which is important for
+    // the soundness of the semantics (i.e. ensuring the sender knows a valid MAC'd message).
+    //
+    // TODO: If the issuer ensures they only ever MAC messages that are valid (e.g. they check a
+    // range proof on issuance) this requirement could be lifted to an extent. One way to
+    // accommodate this is to require a range proof be attached here (or in another method). A
+    // range proof is not required if the message is encodable with Identity. In real applications,
+    // range proofs are only strictly required when the issuer wants to run (non-field) arithmetic
+    // on a secret value (e.g. subtracting 1 from a quota). Fields that are not modified can be
+    // assumed to be in range by the fact that they were checked at issuance, either with a range
+    // proof of because the fields were set by the issuer.
     Msg: Attributes<Identity<RistrettoScalar>>,
 {
     pub fn verify_presentation(
@@ -313,7 +325,16 @@ where
 
         // Produce a ZKP attesting to the knowledge of an opening for the committed values.
         // NOTE: Unwrap will never panic, prove_presentation is infallible.
-        let proof = prove_presentation(self.u, r_v, z, r, msg, pp, &commit_msg).unwrap();
+        let proof = prove_presentation(
+            self.u,
+            r_v,
+            z,
+            &r,
+            &Identity::elem_iter(msg).collect(),
+            pp,
+            &commit_msg,
+        )
+        .unwrap();
 
         Presentation {
             u: self.u.compress(),
@@ -378,13 +399,13 @@ fn prove_presentation<Msg>(
     u: RistrettoPoint,
     r_v: RistrettoScalar,
     z: RistrettoPoint,
-    r: GenericArray<RistrettoScalar, Msg::N>,
-    msg: &Msg,
+    r: &GenericArray<RistrettoScalar, Msg::N>,
+    msg: &GenericArray<RistrettoScalar, Msg::N>,
     pp: &PublicParameters<RistrettoPoint, Msg>,
     commit_msg: &GenericArray<RistrettoPoint, Msg::N>,
 ) -> Result<SchnorrProof, Infallible>
 where
-    Msg: Attributes<Identity<RistrettoScalar>>,
+    Msg: AttributeCount,
 {
     // A small macro to construct the labels for variables that get added to the transcript.
     macro_rules! label {
@@ -417,12 +438,12 @@ where
 
     // Constrain each C_i = m_i * U + r_i * G
     let iter = zip_eq(
-        zip_eq(Identity::elem_iter(msg), r_vars.as_slice()),
+        zip_eq(msg.as_slice(), r_vars.as_slice()),
         commit_msg.as_slice(),
     );
     for ((m_i, r_i_var), c_i) in iter {
         let mut constraint_c_i = Constraint::new();
-        constraint_c_i.add(&mut prover, (label!("m_i"), m_i), u_var)?;
+        constraint_c_i.add(&mut prover, (label!("m_i"), *m_i), u_var)?;
         constraint_c_i.add(&mut prover, *r_i_var, g_var)?;
         constraint_c_i.eq(&mut prover, (label!("c_i"), *c_i))?;
     }
