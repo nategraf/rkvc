@@ -10,12 +10,16 @@ use curve25519_dalek::{
     Scalar as RistrettoScalar,
 };
 use ff::Field;
+use generic_array::GenericArray;
 use itertools::zip_eq;
 
 use crate::{
     attributes::{Attributes, Visitor, VisitorOutput},
     pederson::{PedersonCommitment, PedersonGenerators},
-    zkp::{CompactProof as SchnorrProof, Constraint, Prover, SchnorrCS, Transcript, Verifier},
+    zkp::{
+        AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover,
+        Transcript, Verifier,
+    },
 };
 
 pub struct RangeProofEncoder<F: Field>(PhantomData<F>);
@@ -147,8 +151,8 @@ where
         blind: RistrettoScalar,
     ) -> Result<BulletPoK<Msg>, ProveError> {
         // TODO: Make these labels configurable / move transcript to arguments.
-        let mut transcript = Transcript::new(b"PoKTranscript");
-        let mut prover = Prover::new(b"PoKConstraints", &mut transcript);
+        let mut transcript = Transcript::new(b"rkvc::range::PoK::transcript");
+        let mut prover = Prover::new(b"rkvc::range::PoK::constraints", &mut transcript);
 
         // Seperate generators are used to commit to the individual range-check values because all
         // values in a batched range check must be committed to using the same generators.
@@ -158,35 +162,44 @@ where
         // Build out the constraints for proof of knowledge for the commit opening.
         // NOTE: Order of variable allocation effects the transcript.
         let mut opening_constraint = Constraint::<Prover>::new();
-        let mut attribute_vars: Vec<<Prover<'_> as SchnorrCS>::ScalarVar> = Vec::new();
-        let iter = zip_eq(
-            zip_eq(
+        let attribute_vars: GenericArray<_, Msg::N> = prover
+            .alloc_scalars(zip_eq(
                 Msg::label_iter(),
-                msg.attribute_walk(RangeProofEncoder::default()),
-            ),
-            pederson_generators.1.as_slice(),
-        );
-        for ((label, (x, _)), g) in iter {
-            // Add scalars to the opening proof and save the variables to link to the range proof.
-            // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
-            let x_var = prover.allocate_scalar(label.as_bytes(), x);
-            attribute_vars.push(x_var);
-            opening_constraint.add(&mut prover, x_var, (label, *g))?;
-        }
-        opening_constraint.add(
-            &mut prover,
-            ("PoK::blind", blind),
-            ("PoK::blind_gen", pederson_generators.0),
-        )?;
-        opening_constraint.eq(&mut prover, ("PoK::commit", commit.elem))?;
+                msg.attribute_walk(RangeProofEncoder::default())
+                    .map(|(x, _)| x),
+            ))
+            .unwrap();
+        opening_constraint
+            .sum(
+                &mut prover,
+                attribute_vars.iter().copied(),
+                zip_eq(Msg::label_iter(), pederson_generators.1),
+            )
+            .unwrap();
+        opening_constraint
+            .add(
+                &mut prover,
+                ("rkvc::range::PoK::blind", blind),
+                ("rkvc::range::PoK::blind_gen", pederson_generators.0),
+            )
+            .unwrap();
+        opening_constraint
+            .eq(&mut prover, ("rkvc::range::PoK::commit", commit.elem))
+            .unwrap();
 
         // Allocate variables for the linking of the commitment opening to the range proof.
-        let (bulletproof_commit_b_var, _) =
-            prover.allocate_point(b"PoK::bulletproof_commit_b", bulletproof_commit_gens.B);
-        let (bulletproof_commit_b_blind_var, _) = prover.allocate_point(
-            b"PoK::bulletproof_commit_b_blind",
-            bulletproof_commit_gens.B_blinding,
-        );
+        let bulletproof_commit_b_var = prover
+            .alloc_point((
+                "rkvc::range::PoK::bulletproof_commit_b",
+                bulletproof_commit_gens.B,
+            ))
+            .unwrap();
+        let bulletproof_commit_b_blind_var = prover
+            .alloc_point((
+                "rkvc::range::PoK::bulletproof_commit_b",
+                bulletproof_commit_gens.B_blinding,
+            ))
+            .unwrap();
 
         // Populate the constraints proving knowledge of an opening for the bulletproof value
         // commitments, and their linkage to the main commitment.
@@ -277,8 +290,8 @@ where
         commit: &PedersonCommitment<CompressedRistretto, Msg>,
     ) -> Result<(), VerifyError> {
         // TODO: Make these labels configurable / move transcript to arguments.
-        let mut transcript = Transcript::new(b"PoKTranscript");
-        let mut verifier = Verifier::new(b"PoKConstraints", &mut transcript);
+        let mut transcript = Transcript::new(b"rkvc::range::PoK::transcript");
+        let mut verifier = Verifier::new(b"rkvc::range::PoK::constraints", &mut transcript);
 
         // Seperate generators are used to commit to the individual range-check values because all
         // values in a batched range check must be committed to using the same generators.
@@ -287,36 +300,35 @@ where
 
         // Build out the constraints for proof of knowledge for the commit opening.
         // NOTE: Order of variable allocation effects the transcript.
-        let mut constraint = Constraint::<Verifier>::new();
-        let mut x_vars = Vec::new();
-        let iter = zip_eq(
-            zip_eq(
-                Msg::label_iter(),
-                Msg::attribute_type_walk(RangeProofEncoder::default()),
-            ),
-            pederson_generators.1.as_slice(),
-        );
-        for ((label, _), g) in iter {
-            // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
-            let x_var = verifier.allocate_scalar(label.as_bytes());
-            x_vars.push(x_var);
-            constraint.add(&mut verifier, x_var, (label, *g))?;
-        }
-        constraint.add(
-            &mut verifier,
-            "PoK::blind",
-            ("PoK::blind_gen", pederson_generators.0),
-        )?;
-        constraint.eq(&mut verifier, ("PoK::commit", commit.elem))?;
+        let mut opening_constraint = Constraint::new();
+        let attribute_vars: GenericArray<_, Msg::N> = verifier.alloc_scalars(Msg::label_iter())?;
+        opening_constraint
+            .sum(
+                &mut verifier,
+                attribute_vars.iter().copied(),
+                zip_eq(Msg::label_iter(), pederson_generators.1),
+            )
+            .unwrap();
+        opening_constraint
+            .add(
+                &mut verifier,
+                "rkvc::range::PoK::blind",
+                ("rkvc::range::PoK::blind_gen", pederson_generators.0),
+            )
+            .unwrap();
+        opening_constraint
+            .eq(&mut verifier, ("rkvc::range::PoK::commit", commit.elem))
+            .unwrap();
 
-        let bulletproof_commit_b_var = verifier.allocate_point(
-            b"PoK::bulletproof_commit_b",
-            bulletproof_commit_gens.B.compress(),
-        )?;
-        let bulletproof_commit_b_blind_var = verifier.allocate_point(
-            b"PoK::bulletproof_commit_b_blind",
-            bulletproof_commit_gens.B_blinding.compress(),
-        )?;
+        // Allocate variables for the linking of the commitment opening to the range proof.
+        let bulletproof_commit_b_var = verifier.alloc_point((
+            "rkvc::range::PoK::bulletproof_commit_b",
+            bulletproof_commit_gens.B,
+        ))?;
+        let bulletproof_commit_b_blind_var = verifier.alloc_point((
+            "rkvc::range::PoK::bulletproof_commit_b",
+            bulletproof_commit_gens.B_blinding,
+        ))?;
 
         // Populate the constraints proving knowledge of an opening for the bulletproof value
         // commitments, and their linkage to the main commitment.
@@ -325,7 +337,7 @@ where
         let iter = zip_eq(
             proof.bulletproof_commits.iter(),
             zip_eq(
-                x_vars,
+                attribute_vars,
                 zip_eq(
                     Msg::label_iter(),
                     Msg::attribute_type_walk(RangeProofEncoder::default()),
