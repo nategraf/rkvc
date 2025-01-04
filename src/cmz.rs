@@ -509,20 +509,39 @@ mod test {
 
     #[test]
     fn basic_blind_mac_fail() {
-        let example = ExampleA {
-            a: 5,
+        let example = ExampleB {
+            a: 5u64.into(),
             b: 7u64.into(),
         };
 
-        let key = Key::<RistrettoScalar, ExampleA>::gen(&mut rand::thread_rng());
-        let mac = key.mac(&example);
+        let key = Key::<RistrettoScalar, ExampleB>::gen(&mut rand::thread_rng());
+        let pp = key.public_parameters();
 
-        let bad_example = ExampleA {
-            a: 6,
+        let (commit, blind) =
+            PedersonGenerators::from(pp.clone()).commit(&example, &mut rand::thread_rng());
+        let mut mac = key.blind_mac(&commit);
+        mac.remove_blind(blind);
+        mac.randomize(&mut rand::thread_rng());
+
+        // Ensure that the MAC fails to verify with a different message or key.
+        let bad_example = ExampleB {
+            a: 6u64.into(),
             b: 7u64.into(),
         };
+        let other_key = Key::<RistrettoScalar, ExampleB>::gen(&mut rand::thread_rng());
         let Err(Error::VerificationFailed) = key.verify(&bad_example, &mac) else {
             panic!("mac verify of the wrong message succeeded");
+        };
+        let Err(Error::VerificationFailed) = other_key.verify(&example, &mac) else {
+            panic!("mac verify with the wrong key succeeded");
+        };
+
+        // Ensure that the MAC presentation fails to verify with a different key.
+        let presentation = mac.present(&example, &key.public_parameters(), &mut rand::thread_rng());
+        let Err(Error::VerificationFailed | Error::ZkpError(_)) =
+            other_key.verify_presentation(&presentation)
+        else {
+            panic!("mac presentation verify with the wrong key succeeded");
         };
     }
 
