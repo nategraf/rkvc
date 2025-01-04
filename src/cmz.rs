@@ -209,13 +209,19 @@ where
                 .into_iter()
                 .sum::<RistrettoPoint>();
 
-        verify_presentation(
-            proof,
+        let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
+        let mut verifier = Verifier::new(
+            b"rkvc::cmz::Mac::presentation::constraints",
+            &mut transcript,
+        );
+        constrain_presentation(
+            &mut verifier,
             pres.u,
             z,
             &self.public_parameters().compress(),
             &pres.commit_msg,
         )?;
+        verifier.verify_compact(proof)?;
         Ok(())
     }
 }
@@ -254,16 +260,19 @@ where
     }
 }
 
-impl<G, Msg> From<PublicParameters<G, Msg>> for PedersonGenerators<G, Msg::N>
+impl<G, Msg> PublicParameters<G, Msg>
 where
     Msg: AttributeCount,
     G: Group,
 {
-    fn from(value: PublicParameters<G, Msg>) -> Self {
-        // NOTE: We use the group generator here as the blind generator as a requirement to then be
-        // able to remove the blinding from the final MAC. Without this, the blinding factor for a
-        // commit would need to be carried as part of the MAC.
-        Self(G::generator(), value.1)
+    /// Converts the public public public parameters into [PedersonGenerators] for use in
+    /// committing a message than can then be used as input for a blind MAC.
+    ///
+    /// Uses the group generator here as the blind generator as a requirement to then be
+    /// able to remove the blinding from the final MAC. Without this, the blinding factor for a
+    /// commit would need to be carried as part of the MAC.
+    pub fn into_pederson(self) -> PedersonGenerators<G, Msg::N> {
+        PedersonGenerators(G::generator(), self.1)
     }
 }
 
@@ -330,7 +339,13 @@ where
 
         // Produce a ZKP attesting to the knowledge of an opening for the committed values.
         // NOTE: Unwrap will never panic, prove_presentation is infallible.
-        let proof = prove_presentation(
+        let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
+        let mut prover = Prover::new(
+            b"rkvc::cmz::Mac::presentation::constraints",
+            &mut transcript,
+        );
+        prove_presentation_constraints(
+            &mut prover,
             self.u,
             r_v,
             z,
@@ -340,6 +355,7 @@ where
             &commit_msg,
         )
         .unwrap();
+        let proof = prover.prove_compact();
 
         (
             Presentation {
@@ -352,8 +368,8 @@ where
     }
 }
 
-fn verify_presentation<Msg: AttributeCount>(
-    proof: &SchnorrProof,
+fn constrain_presentation<Msg: AttributeCount>(
+    verifier: &mut Verifier,
     u: CompressedRistretto,
     z: RistrettoPoint,
     pp: &PublicParameters<CompressedRistretto, Msg>,
@@ -365,9 +381,6 @@ fn verify_presentation<Msg: AttributeCount>(
             concat!("rkvc::cmz::Mac::presentation::", $s)
         };
     }
-    let mut transcript = Transcript::new(label!("transcript").as_bytes());
-    let mut verifier = Verifier::new(label!("constraints").as_bytes(), &mut transcript);
-
     // Allocate variables used in multiple constraint declarations.
     let g_var = verifier.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
     let u_var = verifier.alloc_point((label!("u"), u))?;
@@ -377,32 +390,34 @@ fn verify_presentation<Msg: AttributeCount>(
     // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
     let mut constraint_z = Constraint::new();
     constraint_z.sum(
-        &mut verifier,
+        verifier,
         r_vars.iter().copied(),
         pp.1.iter().map(|pp_i| (label!("pp_i"), *pp_i)),
     )?;
     constraint_z.add(
-        &mut verifier,
+        verifier,
         label!("-r_v"),
         (
             label!("h"),
             PublicParameters::<RistrettoPoint, Msg>::h().compress(),
         ),
     )?;
-    constraint_z.eq(&mut verifier, (label!("z"), z))?;
+    constraint_z.eq(verifier, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
     for (r_i_var, c_i) in zip_eq(r_vars.as_slice(), commit_msg.as_slice()) {
         let mut constraint_c_i = Constraint::new();
-        constraint_c_i.add(&mut verifier, label!("m_i"), u_var)?;
-        constraint_c_i.add(&mut verifier, *r_i_var, g_var)?;
-        constraint_c_i.eq(&mut verifier, (label!("c_i"), *c_i))?;
+        constraint_c_i.add(verifier, label!("m_i"), u_var)?;
+        constraint_c_i.add(verifier, *r_i_var, g_var)?;
+        constraint_c_i.eq(verifier, (label!("c_i"), *c_i))?;
     }
 
-    verifier.verify_compact(proof)
+    Ok(())
 }
 
-fn prove_presentation<Msg>(
+#[allow(clippy::too_many_arguments)]
+fn prove_presentation_constraints<Msg>(
+    prover: &mut Prover,
     u: RistrettoPoint,
     r_v: RistrettoScalar,
     z: RistrettoPoint,
@@ -410,7 +425,7 @@ fn prove_presentation<Msg>(
     msg: &GenericArray<RistrettoScalar, Msg::N>,
     pp: &PublicParameters<RistrettoPoint, Msg>,
     commit_msg: &GenericArray<RistrettoPoint, Msg::N>,
-) -> Result<SchnorrProof, Infallible>
+) -> Result<(), Infallible>
 where
     Msg: AttributeCount,
 {
@@ -420,8 +435,6 @@ where
             concat!("rkvc::cmz::Mac::presentation::", $s)
         };
     }
-    let mut transcript = Transcript::new(label!("transcript").as_bytes());
-    let mut prover = Prover::new(label!("constraints").as_bytes(), &mut transcript);
 
     // Allocate variables used in multiple constraint declarations.
     let g_var = prover.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
@@ -432,16 +445,16 @@ where
     // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
     let mut constraint_z = Constraint::new();
     constraint_z.sum(
-        &mut prover,
+        prover,
         r_vars.iter().copied(),
         pp.1.iter().map(|pp_i| (label!("pp_i"), *pp_i)),
     )?;
     constraint_z.add(
-        &mut prover,
+        prover,
         (label!("-r_v"), -r_v),
         (label!("h"), PublicParameters::<RistrettoPoint, Msg>::h()),
     )?;
-    constraint_z.eq(&mut prover, (label!("z"), z))?;
+    constraint_z.eq(prover, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
     let iter = zip_eq(
@@ -450,12 +463,12 @@ where
     );
     for ((m_i, r_i_var), c_i) in iter {
         let mut constraint_c_i = Constraint::new();
-        constraint_c_i.add(&mut prover, (label!("m_i"), *m_i), u_var)?;
-        constraint_c_i.add(&mut prover, *r_i_var, g_var)?;
-        constraint_c_i.eq(&mut prover, (label!("c_i"), *c_i))?;
+        constraint_c_i.add(prover, (label!("m_i"), *m_i), u_var)?;
+        constraint_c_i.add(prover, *r_i_var, g_var)?;
+        constraint_c_i.eq(prover, (label!("c_i"), *c_i))?;
     }
 
-    Ok(prover.prove_compact())
+    Ok(())
 }
 
 #[cfg(test)]
@@ -464,7 +477,6 @@ mod test {
     use rkvc_derive::Attributes;
 
     use super::{Error, Key};
-    use crate::pederson::PedersonGenerators;
 
     #[derive(Attributes, Clone, Debug, PartialEq, Eq)]
     struct ExampleA {
@@ -522,8 +534,10 @@ mod test {
 
         // Client creates a commitment, has the MAC generated over it, then removes the blind from
         // the MAC. This should generate a MAC that is the same (except U) as a plaintext.
-        let (commit, blind) =
-            PedersonGenerators::from(pp.clone()).commit(&example, &mut rand::thread_rng());
+        let (commit, blind) = pp
+            .clone()
+            .into_pederson()
+            .commit(&example, &mut rand::thread_rng());
         let mut mac = key.blind_mac(&commit);
         mac.remove_blind(blind);
         mac.randomize(&mut rand::thread_rng());
@@ -531,8 +545,8 @@ mod test {
         // Ensure that the MAC verifies when given the plaintext message.
         key.verify(&example, &mac).unwrap();
         // Ensure that the MAC verifies when given a presentation.
-        let (presentation, proof) =
-            mac.present(&example, &key.public_parameters(), &mut rand::thread_rng());
+        let (presentation, proof) = mac.present(&example, &pp, &mut rand::thread_rng());
+
         key.verify_presentation(&presentation, &proof).unwrap();
     }
 
@@ -546,8 +560,10 @@ mod test {
         let key = Key::<RistrettoScalar, ExampleB>::gen(&mut rand::thread_rng());
         let pp = key.public_parameters();
 
-        let (commit, blind) =
-            PedersonGenerators::from(pp.clone()).commit(&example, &mut rand::thread_rng());
+        let (commit, blind) = pp
+            .clone()
+            .into_pederson()
+            .commit(&example, &mut rand::thread_rng());
         let mut mac = key.blind_mac(&commit);
         mac.remove_blind(blind);
         mac.randomize(&mut rand::thread_rng());
@@ -566,8 +582,7 @@ mod test {
         };
 
         // Ensure that the MAC presentation fails to verify with a different key.
-        let (presentation, proof) =
-            mac.present(&example, &key.public_parameters(), &mut rand::thread_rng());
+        let (presentation, proof) = mac.present(&example, &pp, &mut rand::thread_rng());
         let Err(Error::VerificationFailed | Error::ZkpError(_)) =
             other_key.verify_presentation(&presentation, &proof)
         else {
