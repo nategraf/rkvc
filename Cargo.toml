@@ -35,5 +35,9 @@ zeroize = { version = "1.8.1", default-features = false }
 rkvc = { path = ".", features = ["std"] }
 rkvc-derive = { path = "./derive" }
 
+[profile.dev]
+# Makes tests run much faster at the cost of slightly longer builds.
+opt-level = 1
+
 [features]
 std = []
