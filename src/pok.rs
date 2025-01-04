@@ -1,40 +1,19 @@
 //! Proof of knowledge for a Pederson commitment opening.
 //! NOTE: WIP module to be broken up.
 
-use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use curve25519_dalek::{RistrettoPoint, Scalar as RistrettoScalar};
 use group::Group;
 use itertools::zip_eq;
-use lox_zkp::{
-    toolbox::{prover::Prover, verifier::Verifier, SchnorrCS},
-    CompactProof, Transcript,
-};
 
 use crate::{
     attributes::{Attributes, Identity},
     pederson::{PedersonCommitment, PedersonGenerators},
+    zkp::{CompactProof, Constraint, ProofError, Prover, Transcript, Verifier},
 };
 
 pub struct PoK<G: Group, Msg>(PhantomData<G>, PhantomData<Msg>);
-
-impl<G: Group, Msg> PoK<G, Msg> {
-    // Constraint definition shared by prover and verifier. Ensures the prover knows some slice of
-    // scalars that can be used to open the commitment.
-    //
-    // Variables are allocated to the Prover and to the Verifier respectively and then passed into
-    // this function. Note that the slices should include the blinding factor and associated
-    // generator.
-    fn constrain<CS: SchnorrCS>(
-        cs: &mut CS,
-        commit: CS::PointVar,
-        msg_vars: impl IntoIterator<Item = CS::ScalarVar>,
-        gen_vars: impl IntoIterator<Item = CS::PointVar>,
-    ) {
-        cs.constrain(commit, zip_eq(msg_vars, gen_vars).collect::<Vec<_>>());
-    }
-}
 
 impl<Msg> PoK<RistrettoPoint, Msg>
 where
@@ -46,61 +25,60 @@ where
         blind: RistrettoScalar,
     ) -> CompactProof {
         // TODO: Make these labels configurable / move transcript to arguments.
-        let mut transcript = Transcript::new(b"PoKTranscript");
-        let mut prover = Prover::new(b"PoKConstraints", &mut transcript);
+        let mut transcript = Transcript::new(b"rkvc::pok::PoK::transcript");
+        let mut prover = Prover::new(b"rkvc::pok::PoK::constraints", &mut transcript);
 
         let pederson_generators = PedersonGenerators::attributes_default::<Msg>();
-        let iter = zip_eq(
-            zip_eq(Msg::label_iter(), Identity::elem_iter(msg)),
-            pederson_generators.1.as_slice(),
-        );
 
-        // Allocate all the variables, note that this is repeated with respect to the verifier.
-        // NOTE: Order of variable allocation effects the transcript.
-        let (commit_var, _) = prover.allocate_point(b"PoK::commit", commit.elem);
-        let mut msg_vars = Vec::new();
-        let mut gen_vars = Vec::new();
-        for ((label, x), g) in iter {
-            // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
-            msg_vars.push(prover.allocate_scalar(label.as_bytes(), x));
-            gen_vars.push(prover.allocate_point(label.as_bytes(), *g).0);
-        }
-        msg_vars.push(prover.allocate_scalar(b"PoK::blind", blind));
-        gen_vars.push(
-            prover
-                .allocate_point(b"PoK::blind_gen", pederson_generators.0)
-                .0,
-        );
+        // Constrain C = \Sigma_i m_i * G_i + s * G_blind
+        // TODO: differentiate the labels for the scalar and the point.
+        let mut constraint = Constraint::new();
+        constraint
+            .sum(
+                &mut prover,
+                zip_eq(Msg::label_iter(), Identity::elem_iter(msg)),
+                zip_eq(Msg::label_iter(), pederson_generators.1),
+            )
+            .unwrap();
+        constraint
+            .add(
+                &mut prover,
+                ("rkvc::pok::PoK::blind", blind),
+                ("rkvc::pok::PoK::blind_gen", pederson_generators.0),
+            )
+            .unwrap();
+        constraint
+            .eq(&mut prover, ("rkvc::pok::PoK::commit", commit.elem))
+            .unwrap();
 
-        Self::constrain(&mut prover, commit_var, msg_vars, gen_vars);
         prover.prove_compact()
     }
 
     pub fn verify(
         proof: &CompactProof,
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
-    ) -> Result<(), lox_zkp::ProofError> {
+    ) -> Result<(), ProofError> {
         // TODO: Make these labels configurable / move transcript to arguments.
-        let mut transcript = Transcript::new(b"PoKTranscript");
-        let mut verifier = Verifier::new(b"PoKConstraints", &mut transcript);
+        let mut transcript = Transcript::new(b"rkvc::pok::PoK::transcript");
+        let mut verifier = Verifier::new(b"rkvc::pok::PoK::constraints", &mut transcript);
 
         let pederson_generators = PedersonGenerators::attributes_default::<Msg>().compress();
-        let iter = zip_eq(Msg::label_iter(), pederson_generators.1.as_slice());
 
-        // Allocate all the variables, note that this is repeated with respect to the verifier.
-        // NOTE: Order of variable allocation effects the transcript.
-        let commit_var = verifier.allocate_point(b"PoK::commit", commit.elem.compress())?;
-        let mut msg_vars = Vec::new();
-        let mut gen_vars = Vec::new();
-        for (label, g) in iter {
-            // TODO: differentiate these labels. Cannot be runtime strings due to API constraints.
-            msg_vars.push(verifier.allocate_scalar(label.as_bytes()));
-            gen_vars.push(verifier.allocate_point(label.as_bytes(), *g)?);
-        }
-        msg_vars.push(verifier.allocate_scalar(b"PoK::blind"));
-        gen_vars.push(verifier.allocate_point(b"PoK::blind_gen", pederson_generators.0)?);
+        // Constrain C = \Sigma_i m_i * G_i + s * G_blind
+        // TODO: differentiate the labels for the scalar and the point.
+        let mut constraint = Constraint::new();
+        constraint.sum(
+            &mut verifier,
+            Msg::label_iter(),
+            zip_eq(Msg::label_iter(), pederson_generators.1),
+        )?;
+        constraint.add(
+            &mut verifier,
+            "rkvc::pok::PoK::blind",
+            ("rkvc::pok::PoK::blind_gen", pederson_generators.0),
+        )?;
+        constraint.eq(&mut verifier, ("rkvc::pok::PoK::commit", commit.elem))?;
 
-        Self::constrain(&mut verifier, commit_var, msg_vars, gen_vars);
         verifier.verify_compact(proof)
     }
 }
