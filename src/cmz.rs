@@ -93,13 +93,8 @@ where
     }
 
     pub fn public_parameters(&self) -> PublicParameters<RistrettoPoint, Msg> {
-        // H is used as the base point to commit to the first scalar in the key, x_0. It is
-        // critical that it not have a known discreet log relative to G, the base point used to
-        // commit to other key values.
-        let h =
-            RistrettoPoint::hash_from_bytes::<Blake2b512>(b"rvkc::cmz::Key::public_parameters::h");
         PublicParameters(
-            h.mul(self.0),
+            PublicParameters::<RistrettoPoint, Msg>::h().mul(self.0),
             self.1
                 .iter()
                 .map(|x| RISTRETTO_BASEPOINT_TABLE.mul(x))
@@ -212,6 +207,13 @@ impl<Msg> PublicParameters<RistrettoPoint, Msg>
 where
     Msg: AttributeCount,
 {
+    /// H is used as the base point to commit to the first scalar in the key, x_0. It is
+    /// critical that it not have a known discreet log relative to G, the base point used to
+    /// commit to other key values.
+    pub fn h() -> RistrettoPoint {
+        RistrettoPoint::hash_from_bytes::<Blake2b512>(b"rvkc::cmz::Key::public_parameters::h")
+    }
+
     pub fn compress(&self) -> PublicParameters<CompressedRistretto, Msg> {
         PublicParameters(
             self.0.compress(),
@@ -290,20 +292,24 @@ where
     where
         R: CryptoRngCore + ?Sized,
     {
+        // Randomize the RNG before presentation to ensure that the sent U value cannot be linked
+        // to the one that was issued, or shown in any previous presentation of the same MAC.
         self.randomize(rng);
+
         let r_v = RistrettoScalar::random(rng);
-        let commit_v = self.v + pp.0.mul(r_v);
+        let commit_v_blind_point = PublicParameters::<RistrettoPoint, Msg>::h().mul(r_v);
+        let commit_v = self.v + commit_v_blind_point;
 
         let r: GenericArray<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
             .map(|_| RistrettoScalar::random(rng))
             .collect();
         let commit_msg = zip_eq(Identity::elem_iter(msg), r.as_slice())
-            .map(|(m, r_i)| self.u.mul(m) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))
+            .map(|(m_i, r_i)| self.u.mul(m_i) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))
             .collect::<GenericArray<RistrettoPoint, Msg::N>>();
         let z = zip_eq(r.as_slice(), pp.1.as_slice())
-            .map(|(r_i, x_i)| x_i.mul(r_i))
+            .map(|(r_i, pp_i)| pp_i.mul(r_i))
             .sum::<RistrettoPoint>()
-            - RISTRETTO_BASEPOINT_TABLE.mul(&r_v);
+            - commit_v_blind_point;
 
         // Produce a ZKP attesting to the knowledge of an opening for the committed values.
         // NOTE: Unwrap will never panic, prove_presentation is infallible.
@@ -347,7 +353,14 @@ fn verify_presentation<Msg: AttributeCount>(
         r_vars.iter().copied(),
         pp.1.iter().map(|pp_i| (label!("pp_i"), *pp_i)),
     )?;
-    constraint_z.add(&mut verifier, label!("-r_v"), (label!("h"), pp.0))?;
+    constraint_z.add(
+        &mut verifier,
+        label!("-r_v"),
+        (
+            label!("h"),
+            PublicParameters::<RistrettoPoint, Msg>::h().compress(),
+        ),
+    )?;
     constraint_z.eq(&mut verifier, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
@@ -395,7 +408,11 @@ where
         r_vars.iter().copied(),
         pp.1.iter().map(|pp_i| (label!("pp_i"), *pp_i)),
     )?;
-    constraint_z.add(&mut prover, (label!("-r_v"), -r_v), (label!("h"), pp.0))?;
+    constraint_z.add(
+        &mut prover,
+        (label!("-r_v"), -r_v),
+        (label!("h"), PublicParameters::<RistrettoPoint, Msg>::h()),
+    )?;
     constraint_z.eq(&mut prover, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
