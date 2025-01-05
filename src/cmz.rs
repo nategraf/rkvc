@@ -67,41 +67,7 @@ impl From<crate::zkp::ProofError> for Error {
     }
 }
 
-impl<Msg> Key<RistrettoScalar, Msg>
-where
-    Msg: AttributeCount,
-{
-    pub fn blind_mac(
-        &self,
-        commit: &PedersonCommitment<RistrettoPoint, Msg>,
-    ) -> Mac<RistrettoPoint, Msg> {
-        // Use a hasher to generate the secret dlog of U from a combination of the secret key and
-        // the commitment. Ensures that two messages will not be mac'd with the same U. Note that
-        // the commitment must be binding here.
-        let mut hasher = Blake2b512::new();
-        hasher.update("rkvc::cmz::Key::blind_mac");
-        hasher.update(self.0.as_bytes());
-        hasher.update(commit.elem.to_bytes());
-        let u_scalar = RistrettoScalar::from_hash(hasher);
-        let v = u_scalar.mul((&self.0).mul(RISTRETTO_BASEPOINT_TABLE) + commit.elem);
-        Mac {
-            u: (&u_scalar).mul(RISTRETTO_BASEPOINT_TABLE),
-            v,
-            _phantom_msg: PhantomData,
-        }
-    }
-
-    pub fn public_parameters(&self) -> PublicParameters<RistrettoPoint, Msg> {
-        PublicParameters(
-            PublicParameters::<RistrettoPoint, Msg>::h().mul(self.0),
-            self.1
-                .iter()
-                .map(|x| RISTRETTO_BASEPOINT_TABLE.mul(x))
-                .collect(),
-        )
-    }
-}
-
+// TODO: Add methods that yield both a mac and a ZKP.
 impl<Msg> Key<RistrettoScalar, Msg>
 where
     Msg: AttributeCount,
@@ -117,14 +83,21 @@ where
                 .collect(),
         )
     }
-}
 
-// TODO: Add methods that yield both a mac and a ZKP.
-impl<Msg> Key<RistrettoScalar, Msg>
-where
-    Msg: Attributes<UintEncoder<RistrettoScalar>>,
-{
-    pub fn mac(&self, msg: &Msg) -> Mac<RistrettoPoint, Msg> {
+    pub fn public_parameters(&self) -> PublicParameters<RistrettoPoint, Msg> {
+        PublicParameters(
+            PublicParameters::<RistrettoPoint, Msg>::h().mul(self.0),
+            self.1
+                .iter()
+                .map(|x| RISTRETTO_BASEPOINT_TABLE.mul(x))
+                .collect(),
+        )
+    }
+
+    pub fn mac(&self, msg: &Msg) -> Mac<RistrettoPoint, Msg>
+    where
+        Msg: Attributes<UintEncoder<RistrettoScalar>>,
+    {
         // Use a hasher to generate the secret dlog of U from a combination of the secret key and
         // the message attributes. Ensures that two messages will not be mac'd with the same U.
         // TODO: This is fine when used with Blake2, but using HKDF or simmilar may be better.
@@ -148,7 +121,10 @@ where
         }
     }
 
-    pub fn verify(&self, msg: &Msg, mac: &Mac<RistrettoPoint, Msg>) -> Result<(), Error> {
+    pub fn verify(&self, msg: &Msg, mac: &Mac<RistrettoPoint, Msg>) -> Result<(), Error>
+    where
+        Msg: Attributes<UintEncoder<RistrettoScalar>>,
+    {
         let invalid_u = mac.u.is_identity();
         let v = mac.u.mul(
             self.0
@@ -162,10 +138,27 @@ where
             false => Ok(()),
         }
     }
-}
 
-impl<Msg> Key<RistrettoScalar, Msg>
-where
+    pub fn blind_mac(
+        &self,
+        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+    ) -> Mac<RistrettoPoint, Msg> {
+        // Use a hasher to generate the secret dlog of U from a combination of the secret key and
+        // the commitment. Ensures that two messages will not be mac'd with the same U. Note that
+        // the commitment must be binding here.
+        let mut hasher = Blake2b512::new();
+        hasher.update("rkvc::cmz::Key::blind_mac");
+        hasher.update(self.0.as_bytes());
+        hasher.update(commit.elem.to_bytes());
+        let u_scalar = RistrettoScalar::from_hash(hasher);
+        let v = u_scalar.mul((&self.0).mul(RISTRETTO_BASEPOINT_TABLE) + commit.elem);
+        Mac {
+            u: (&u_scalar).mul(RISTRETTO_BASEPOINT_TABLE),
+            v,
+            _phantom_msg: PhantomData,
+        }
+    }
+
     // NOTE: Requiring the message to be encodable with the Identity encoder restricts to messages
     // that only contain the group scalar field elements (and not e.g. u64), which is important for
     // the soundness of the semantics (i.e. ensuring the sender knows a valid MAC'd message).
@@ -182,13 +175,14 @@ where
     // Perhaps I should return a commitment here, as an indication that they should be checking
     // this commitment. Main issue with this is that the presentation includes a SchnorrProof and
     // already, and doing anything useful with the commit would require further binding it.
-    Msg: Attributes<Identity<RistrettoScalar>>,
-{
     pub fn verify_presentation(
         &self,
         pres: &Presentation<CompressedRistretto, Msg>,
         proof: &SchnorrProof,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        Msg: Attributes<Identity<RistrettoScalar>>,
+    {
         let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
         let mut verifier = Verifier::new(
             b"rkvc::cmz::Mac::presentation::constraints",
@@ -198,12 +192,7 @@ where
         verifier.verify_compact(proof)?;
         Ok(())
     }
-}
 
-impl<Msg> Key<RistrettoScalar, Msg>
-where
-    Msg: AttributeCount,
-{
     // NOTE: This function exists as a partial answer to the comments above on the Identity
     // trait bound for Msg. TODO: Should it be moved as a member of the presentation.
     pub fn constrain_presentation(
@@ -241,6 +230,22 @@ where
     }
 }
 
+impl<G, Msg> PublicParameters<G, Msg>
+where
+    Msg: AttributeCount,
+    G: Group,
+{
+    /// Converts the public public public parameters into [PedersonGenerators] for use in
+    /// committing a message than can then be used as input for a blind MAC.
+    ///
+    /// Uses the group generator here as the blind generator as a requirement to then be
+    /// able to remove the blinding from the final MAC. Without this, the blinding factor for a
+    /// commit would need to be carried as part of the MAC.
+    pub fn into_pederson(self) -> PedersonGenerators<G, Msg::N> {
+        PedersonGenerators(G::generator(), self.1)
+    }
+}
+
 impl<Msg> PublicParameters<RistrettoPoint, Msg>
 where
     Msg: AttributeCount,
@@ -275,26 +280,7 @@ where
     }
 }
 
-impl<G, Msg> PublicParameters<G, Msg>
-where
-    Msg: AttributeCount,
-    G: Group,
-{
-    /// Converts the public public public parameters into [PedersonGenerators] for use in
-    /// committing a message than can then be used as input for a blind MAC.
-    ///
-    /// Uses the group generator here as the blind generator as a requirement to then be
-    /// able to remove the blinding from the final MAC. Without this, the blinding factor for a
-    /// commit would need to be carried as part of the MAC.
-    pub fn into_pederson(self) -> PedersonGenerators<G, Msg::N> {
-        PedersonGenerators(G::generator(), self.1)
-    }
-}
-
-impl<Msg> Mac<RistrettoPoint, Msg>
-where
-    Msg: AttributeCount,
-{
+impl<Msg> Mac<RistrettoPoint, Msg> {
     /// Upon receiving the MAC, the blinding factor used to hide the message from the issuer can
     /// and should be removed. This is done by setting V = V - sU.
     pub fn remove_blind(&mut self, blind: RistrettoScalar) {
@@ -313,12 +299,7 @@ where
         self.v = self.v.mul(r);
         r
     }
-}
 
-impl<Msg> Mac<RistrettoPoint, Msg>
-where
-    Msg: Attributes<Identity<RistrettoScalar>>,
-{
     /// Creates a hiding (i.e. zero-knowledge) presentation of the MAC that can be verified by the
     /// issuer to ensure that the presenter has knowledge of a valid MAC, without learning anything
     /// about the underlying message.
@@ -332,6 +313,7 @@ where
     ) -> (Presentation<CompressedRistretto, Msg>, SchnorrProof)
     where
         R: CryptoRngCore + ?Sized,
+        Msg: Attributes<Identity<RistrettoScalar>>,
     {
         // Randomize the RNG before presentation to ensure that the sent U value cannot be linked
         // to the one that was issued, or shown in any previous presentation of the same MAC.
@@ -354,12 +336,7 @@ where
 
         (presentation, proof)
     }
-}
 
-impl<Msg> Mac<RistrettoPoint, Msg>
-where
-    Msg: AttributeCount,
-{
     /// Adds the constraints for the presentation to an existing proving, in order to compose with
     /// other statements being proven.
     ///
@@ -373,6 +350,7 @@ where
     ) -> Presentation<CompressedRistretto, Msg>
     where
         R: CryptoRngCore + ?Sized,
+        Msg: AttributeCount,
     {
         let r_v = RistrettoScalar::random(rng);
         let commit_v_blind_point = PublicParameters::<RistrettoPoint, Msg>::h().mul(r_v);
