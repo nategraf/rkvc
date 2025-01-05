@@ -15,7 +15,7 @@ use itertools::zip_eq;
 
 use crate::{
     attributes::{Attributes, Visitor, VisitorOutput},
-    pederson::{PedersonCommitment, PedersonGenerators},
+    pederson::PedersonCommitment,
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover,
         Transcript, Verifier,
@@ -157,35 +157,18 @@ where
         // Seperate generators are used to commit to the individual range-check values because all
         // values in a batched range check must be committed to using the same generators.
         let bulletproof_commit_gens = bulletproofs::PedersenGens::default();
-        let pederson_generators = PedersonGenerators::attributes_default::<Msg>();
 
         // Build out the constraints for proof of knowledge for the commit opening.
         // NOTE: Order of variable allocation effects the transcript.
-        let mut opening_constraint = Constraint::<Prover>::new();
+        // Encode the message as scalars, ignoring the number of bits for the purpose of opening
+        // the commitment (it is verified with a range proof below).
         let attribute_vars: GenericArray<_, Msg::N> = prover
-            .alloc_scalars(zip_eq(
-                Msg::label_iter(),
-                msg.attribute_walk(RangeProofEncoder::default())
-                    .map(|(x, _)| x),
-            ))
-            .unwrap();
-        opening_constraint
-            .sum(
-                &mut prover,
-                attribute_vars.iter().copied(),
-                zip_eq(Msg::label_iter(), pederson_generators.1),
+            .alloc_scalars(
+                msg.encode_attributes_labeled()
+                    .map(|(label, (m, _))| (label, m)),
             )
             .unwrap();
-        opening_constraint
-            .add(
-                &mut prover,
-                ("rkvc::range::PoK::blind", blind),
-                ("rkvc::range::PoK::blind_gen", pederson_generators.0),
-            )
-            .unwrap();
-        opening_constraint
-            .eq(&mut prover, ("rkvc::range::PoK::commit", commit.elem))
-            .unwrap();
+        commit.prove_opening_constraints(&mut prover, &attribute_vars, blind);
 
         // Allocate variables for the linking of the commitment opening to the range proof.
         let bulletproof_commit_b_var = prover
@@ -206,14 +189,7 @@ where
         let mut bulletproof_values = Vec::new();
         let mut bulletproof_blinds = Vec::new();
         let mut bits_max: Option<u32> = None;
-        let iter = zip_eq(
-            attribute_vars,
-            zip_eq(
-                Msg::label_iter(),
-                msg.attribute_walk(RangeProofEncoder::default()),
-            ),
-        );
-        for (x_var, (label, (x, bits))) in iter {
+        for (x_var, (label, (x, bits))) in zip_eq(attribute_vars, msg.encode_attributes_labeled()) {
             if let Some(bits) = bits {
                 // TODO: Enforce sub-range membership.
                 bits_max = Some(bits_max.map(|x| u32::max(x, bits)).unwrap_or(bits));
@@ -296,29 +272,13 @@ where
         // Seperate generators are used to commit to the individual range-check values because all
         // values in a batched range check must be committed to using the same generators.
         let bulletproof_commit_gens = bulletproofs::PedersenGens::default();
-        let pederson_generators = PedersonGenerators::attributes_default::<Msg>().compress();
 
         // Build out the constraints for proof of knowledge for the commit opening.
         // NOTE: Order of variable allocation effects the transcript.
-        let mut opening_constraint = Constraint::new();
+        // Encode the message, ignoring the number of bits for the purpose of opening the
+        // commitment (it is verified with a range proof below).
         let attribute_vars: GenericArray<_, Msg::N> = verifier.alloc_scalars(Msg::label_iter())?;
-        opening_constraint
-            .sum(
-                &mut verifier,
-                attribute_vars.iter().copied(),
-                zip_eq(Msg::label_iter(), pederson_generators.1),
-            )
-            .unwrap();
-        opening_constraint
-            .add(
-                &mut verifier,
-                "rkvc::range::PoK::blind",
-                ("rkvc::range::PoK::blind_gen", pederson_generators.0),
-            )
-            .unwrap();
-        opening_constraint
-            .eq(&mut verifier, ("rkvc::range::PoK::commit", commit.elem))
-            .unwrap();
+        commit.constrain_opening(&mut verifier, &attribute_vars)?;
 
         // Allocate variables for the linking of the commitment opening to the range proof.
         let bulletproof_commit_b_var = verifier.alloc_point((

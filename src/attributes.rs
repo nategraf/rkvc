@@ -64,16 +64,6 @@ impl<T: Clone> Visitor<&T> for UintEncoder<T> {
     }
 }
 
-impl<T> UintEncoder<T> {
-    // TODO: Understand wtf use does here.
-    pub fn encode<A>(attributes: &A) -> impl Iterator<Item = T> + use<'_, A, T>
-    where
-        A: Attributes<Self>,
-    {
-        attributes.attribute_walk(Self::default())
-    }
-}
-
 pub struct Identity<T>(PhantomData<T>);
 
 impl<T> Default for Identity<T> {
@@ -100,16 +90,6 @@ impl<T: Clone> Visitor<&T> for Identity<T> {
     #[inline]
     fn visit(&mut self, value: &T) -> Self::Output {
         value.clone()
-    }
-}
-
-impl<T> Identity<T> {
-    // TODO: Understand wtf use does here.
-    pub fn elem_iter<A>(attributes: &A) -> impl Iterator<Item = T> + use<'_, A, T>
-    where
-        A: Attributes<Self>,
-    {
-        attributes.attribute_walk(Self::default())
     }
 }
 
@@ -145,6 +125,20 @@ where
     ) -> impl ExactSizeIterator<Item = V::StaticOutput> {
         (0..Self::N::USIZE).map(move |i| Self::attribute_type_at(i, visitor.borrow_mut()).unwrap())
     }
+
+    fn encode_attributes(&self) -> impl ExactSizeIterator<Item = V::Output>
+    where
+        V: Default,
+    {
+        self.attribute_walk(V::default())
+    }
+
+    fn encode_attributes_labeled(&self) -> impl ExactSizeIterator<Item = (&'static str, V::Output)>
+    where
+        V: Default,
+    {
+        itertools::zip_eq(Self::label_iter(), self.attribute_walk(V::default()))
+    }
 }
 
 #[cfg(test)]
@@ -152,7 +146,7 @@ mod test {
     use curve25519_dalek::Scalar;
     use rkvc_derive::Attributes;
 
-    use super::{AttributeLabels, UintEncoder};
+    use super::{AttributeLabels, Attributes, UintEncoder};
 
     #[derive(Attributes)]
     struct Example {
@@ -170,7 +164,7 @@ mod test {
         };
         for (label, x) in itertools::zip_eq(
             Example::label_iter(),
-            UintEncoder::<Scalar>::encode(&example),
+            example.attribute_walk(UintEncoder::default()),
         ) {
             println!("{label}: {x:?}");
         }

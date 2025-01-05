@@ -104,13 +104,13 @@ where
         let mut hasher = Blake2b512::new();
         hasher.update("rkvc::cmz::Key::mac");
         hasher.update(self.0.as_bytes());
-        for m in UintEncoder::encode(msg) {
+        for m in msg.encode_attributes() {
             hasher.update(m.as_bytes());
         }
         let u_scalar = RistrettoScalar::from_hash(hasher);
         let v_scalar: RistrettoScalar = (&u_scalar).mul(
             self.0
-                + zip_eq(UintEncoder::encode(msg), self.1.iter())
+                + zip_eq(msg.encode_attributes(), self.1.iter())
                     .map(|(m, x)| m * x)
                     .sum::<RistrettoScalar>(),
         );
@@ -128,7 +128,7 @@ where
         let invalid_u = mac.u.is_identity();
         let v = mac.u.mul(
             self.0
-                + zip_eq(UintEncoder::encode(msg), self.1.iter())
+                + zip_eq(msg.encode_attributes(), self.1.iter())
                     .map(|(m, x)| m * x)
                     .sum::<RistrettoScalar>(),
         );
@@ -328,7 +328,7 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
         );
         let presentation = self.prove_presentation_constraints(
             &mut prover,
-            &Identity::elem_iter(msg).collect(),
+            &msg.encode_attributes().collect(),
             pp,
             rng,
         );
