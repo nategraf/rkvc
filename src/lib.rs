@@ -14,7 +14,6 @@ pub mod pederson;
 pub(crate) mod zkp;
 
 // TODO: Remove these
-pub mod pok;
 pub mod range;
 
 pub mod cmz;

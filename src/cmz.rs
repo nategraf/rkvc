@@ -181,14 +181,35 @@ where
     //
     // Perhaps I should return a commitment here, as an indication that they should be checking
     // this commitment. Main issue with this is that the presentation includes a SchnorrProof and
-    // already, and doing anything useful with the commit would require further binding it. Maybe I
-    // remove the Schnorr proof from the presentation 🤔
+    // already, and doing anything useful with the commit would require further binding it.
     Msg: Attributes<Identity<RistrettoScalar>>,
 {
     pub fn verify_presentation(
         &self,
         pres: &Presentation<CompressedRistretto, Msg>,
         proof: &SchnorrProof,
+    ) -> Result<(), Error> {
+        let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
+        let mut verifier = Verifier::new(
+            b"rkvc::cmz::Mac::presentation::constraints",
+            &mut transcript,
+        );
+        self.constrain_presentation(&mut verifier, pres)?;
+        verifier.verify_compact(proof)?;
+        Ok(())
+    }
+}
+
+impl<Msg> Key<RistrettoScalar, Msg>
+where
+    Msg: AttributeCount,
+{
+    // NOTE: This function exists as a partial answer to the comments above on the Identity
+    // trait bound for Msg. TODO: Should it be moved as a member of the presentation.
+    pub fn constrain_presentation(
+        &self,
+        verifier: &mut Verifier,
+        pres: &Presentation<CompressedRistretto, Msg>,
     ) -> Result<(), Error> {
         let u = pres.u.decompress().ok_or(Error::DecompressFailed)?;
         // NOTE: Unwrapping the CtChoice is ok here because U is non-private.
@@ -209,19 +230,13 @@ where
                 .into_iter()
                 .sum::<RistrettoPoint>();
 
-        let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
-        let mut verifier = Verifier::new(
-            b"rkvc::cmz::Mac::presentation::constraints",
-            &mut transcript,
-        );
         constrain_presentation(
-            &mut verifier,
+            verifier,
             pres.u,
             z,
             &self.public_parameters().compress(),
             &pres.commit_msg,
         )?;
-        verifier.verify_compact(proof)?;
         Ok(())
     }
 }
@@ -322,21 +337,6 @@ where
         // to the one that was issued, or shown in any previous presentation of the same MAC.
         self.randomize(rng);
 
-        let r_v = RistrettoScalar::random(rng);
-        let commit_v_blind_point = PublicParameters::<RistrettoPoint, Msg>::h().mul(r_v);
-        let commit_v = self.v + commit_v_blind_point;
-
-        let r: GenericArray<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
-            .map(|_| RistrettoScalar::random(rng))
-            .collect();
-        let commit_msg = zip_eq(Identity::elem_iter(msg), r.as_slice())
-            .map(|(m_i, r_i)| self.u.mul(m_i) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))
-            .collect::<GenericArray<RistrettoPoint, Msg::N>>();
-        let z = zip_eq(r.as_slice(), pp.1.as_slice())
-            .map(|(r_i, pp_i)| pp_i.mul(r_i))
-            .sum::<RistrettoPoint>()
-            - commit_v_blind_point;
-
         // Produce a ZKP attesting to the knowledge of an opening for the committed values.
         // NOTE: Unwrap will never panic, prove_presentation is infallible.
         let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
@@ -344,27 +344,61 @@ where
             b"rkvc::cmz::Mac::presentation::constraints",
             &mut transcript,
         );
-        prove_presentation_constraints(
+        let presentation = self.prove_presentation_constraints(
             &mut prover,
-            self.u,
-            r_v,
-            z,
-            &r,
             &Identity::elem_iter(msg).collect(),
             pp,
-            &commit_msg,
-        )
-        .unwrap();
+            rng,
+        );
         let proof = prover.prove_compact();
 
-        (
-            Presentation {
-                u: self.u.compress(),
-                commit_v: commit_v.compress(),
-                commit_msg: commit_msg.iter().map(|c| c.compress()).collect(),
-            },
-            proof,
-        )
+        (presentation, proof)
+    }
+}
+
+impl<Msg> Mac<RistrettoPoint, Msg>
+where
+    Msg: AttributeCount,
+{
+    /// Adds the constraints for the presentation to an existing proving, in order to compose with
+    /// other statements being proven.
+    ///
+    /// Does not randomize the MAC; [Mac::randomize] should be called seperately.
+    pub fn prove_presentation_constraints<R>(
+        &self,
+        prover: &mut Prover,
+        msg_encoded: &GenericArray<RistrettoScalar, Msg::N>,
+        pp: &PublicParameters<RistrettoPoint, Msg>,
+        rng: &mut R,
+    ) -> Presentation<CompressedRistretto, Msg>
+    where
+        R: CryptoRngCore + ?Sized,
+    {
+        let r_v = RistrettoScalar::random(rng);
+        let commit_v_blind_point = PublicParameters::<RistrettoPoint, Msg>::h().mul(r_v);
+        let commit_v = self.v + commit_v_blind_point;
+
+        let r: GenericArray<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
+            .map(|_| RistrettoScalar::random(rng))
+            .collect();
+        let commit_msg = zip_eq(msg_encoded.as_slice(), r.as_slice())
+            .map(|(m_i, r_i)| self.u.mul(m_i) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))
+            .collect::<GenericArray<RistrettoPoint, Msg::N>>();
+        let z = zip_eq(r.as_slice(), pp.1.as_slice())
+            .map(|(r_i, pp_i)| pp_i.mul(r_i))
+            .sum::<RistrettoPoint>()
+            - commit_v_blind_point;
+
+        // Add constraints to the prover for the correctness of the presentation.
+        // NOTE: Unwrap will never panic, prove_presentation_constraints is infallible.
+        prove_presentation_constraints(prover, self.u, r_v, z, &r, msg_encoded, pp, &commit_msg)
+            .unwrap();
+
+        Presentation {
+            u: self.u.compress(),
+            commit_v: commit_v.compress(),
+            commit_msg: commit_msg.iter().map(|c| c.compress()).collect(),
+        }
     }
 }
 

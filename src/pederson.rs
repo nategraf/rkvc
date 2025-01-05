@@ -8,13 +8,15 @@ use curve25519_dalek::{
 };
 use generic_array::{ArrayLength, GenericArray};
 use group::Group;
+use itertools::zip_eq;
 use rand_core::CryptoRngCore;
 use subtle::ConstantTimeEq;
 use typenum::U64;
 
 use crate::{
-    attributes::{AttributeCount, AttributeLabels, Attributes, UintEncoder},
+    attributes::{AttributeCount, AttributeLabels, Attributes, Identity, UintEncoder},
     hash::FromHash,
+    zkp::{CompactProof, Constraint, ProofError, Prover, Transcript, Verifier},
 };
 
 #[derive(Clone, Debug)]
@@ -113,6 +115,94 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
             false => Err(PedersonError::VerificationError),
         }
     }
+
+    /// Prove knowledge of an opening for the given commitment.
+    ///
+    /// This function is paired with [PedersonGenerators::verify_opening].
+    pub fn prove_opening<Msg>(
+        &self,
+        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        msg: &Msg,
+        blind: RistrettoScalar,
+    ) -> CompactProof
+    where
+        Msg: Attributes<Identity<RistrettoScalar>>,
+    {
+        macro_rules! label {
+            ($s:literal) => {
+                concat!("rkvc::pederson::PedersonGenerators::opening::", $s)
+            };
+        }
+
+        let mut transcript = Transcript::new(label!("transcript").as_bytes());
+        let mut prover = Prover::new(label!("constraints").as_bytes(), &mut transcript);
+
+        // Constrain C = \Sigma_i m_i * G_i + s * G_blind
+        // TODO: differentiate the labels for the scalar and the point.
+        let mut constraint = Constraint::new();
+        constraint
+            .sum(
+                &mut prover,
+                zip_eq(Msg::label_iter(), Identity::elem_iter(msg)),
+                zip_eq(Msg::label_iter(), self.1.iter().copied()),
+            )
+            .unwrap();
+        constraint
+            .add(
+                &mut prover,
+                (label!("blind"), blind),
+                (label!("blind_gen"), self.0),
+            )
+            .unwrap();
+        constraint
+            .eq(&mut prover, (label!("commit"), commit.elem))
+            .unwrap();
+
+        prover.prove_compact()
+    }
+
+    /// Verify knowledge of an opening for the given commitment.
+    ///
+    /// Note that the message type must consist entirely of field elements (i.e. it is "identity
+    /// encodable"; it does not contain e.g. u64 fields). Under this constraint, it can be
+    /// guaranteed that the prover has knowledge of a valid message, as all field elements  are
+    /// valid.
+    ///
+    /// This function is paired with [PedersonGenerators::prove_opening].
+    pub fn verify_opening<Msg>(
+        &self,
+        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        proof: &CompactProof,
+    ) -> Result<(), ProofError>
+    where
+        Msg: Attributes<Identity<RistrettoScalar>>,
+    {
+        macro_rules! label {
+            ($s:literal) => {
+                concat!("rkvc::pederson::PedersonGenerators::opening::", $s)
+            };
+        }
+
+        let mut transcript = Transcript::new(label!("transcript").as_bytes());
+        let mut verifier = Verifier::new(label!("constraints").as_bytes(), &mut transcript);
+
+        // Constrain C = \Sigma_i m_i * G_i + s * G_blind
+        // TODO: differentiate the labels for the scalar and the point.
+        let mut constraint = Constraint::new();
+        constraint.sum(
+            &mut verifier,
+            Msg::label_iter(),
+            zip_eq(Msg::label_iter(), self.1.iter().copied()),
+        )?;
+        constraint.add(
+            &mut verifier,
+            label!("blind"),
+            (label!("blind_gen"), self.0),
+        )?;
+        constraint.eq(&mut verifier, (label!("commit"), commit.elem))?;
+
+        verifier.verify_compact(proof)
+    }
 }
 
 impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
@@ -154,6 +244,33 @@ where
     pub fn open(&self, msg: &Msg, blind: RistrettoScalar) -> Result<(), PedersonError> {
         PedersonGenerators::attributes_default::<Msg>().open(self, msg, blind)
     }
+
+    /// Prove knowledge of an opening for this commitment, using the default [PedersonGenerators]
+    /// for the specified message type.
+    ///
+    /// This function is paired with [PedersonCommitment::verify_opening].
+    pub fn prove_opening(&self, msg: &Msg, blind: RistrettoScalar) -> CompactProof
+    where
+        Msg: Attributes<Identity<RistrettoScalar>>,
+    {
+        PedersonGenerators::attributes_default::<Msg>().prove_opening(self, msg, blind)
+    }
+
+    /// Verify knowledge of an opening for this commitment, using the default [PedersonGenerators]
+    /// for the specified message type.
+    ///
+    /// Note that the message type must consist entirely of field elements (i.e. it is "identity
+    /// encodable"; it does not contain e.g. u64 fields). Under this constraint, it can be
+    /// guaranteed that the prover has knowledge of a valid message, as all field elements  are
+    /// valid.
+    ///
+    /// This function is paired with [PedersonCommitment::prove_opening].
+    pub fn verify_opening(&self, proof: &CompactProof) -> Result<(), ProofError>
+    where
+        Msg: Attributes<Identity<RistrettoScalar>>,
+    {
+        PedersonGenerators::attributes_default::<Msg>().verify_opening(self, proof)
+    }
 }
 
 impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
@@ -182,18 +299,24 @@ mod test {
     use super::{PedersonCommitment, PedersonError};
 
     #[derive(Attributes)]
-    struct Example {
+    struct ExampleA {
         a: u64,
+        b: Scalar,
+    }
+
+    #[derive(Attributes)]
+    struct ExampleB {
+        a: Scalar,
         b: Scalar,
     }
 
     #[test]
     fn basic_success() {
-        let example = Example {
+        let example = ExampleA {
             a: 42,
             b: Scalar::from(5u64),
         };
-        let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
+        let (commit, blind) = PedersonCommitment::<RistrettoPoint, ExampleA>::commit(
             &example,
             &mut rand::thread_rng(),
         );
@@ -202,22 +325,60 @@ mod test {
 
     #[test]
     fn basic_fail() {
-        let example = Example {
+        let example = ExampleA {
             a: 42,
             b: Scalar::from(5u64),
         };
-        let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
+        let (commit, blind) = PedersonCommitment::<RistrettoPoint, ExampleA>::commit(
             &example,
             &mut rand::thread_rng(),
         );
         commit.open(&example, blind).unwrap();
 
-        let mangled_example = Example {
+        let mangled_example = ExampleA {
             a: 42,
             b: Scalar::from(6u64),
         };
         let Err(PedersonError::VerificationError) = commit.open(&mangled_example, blind) else {
             panic!("open did not fail with verification error");
+        };
+    }
+
+    #[test]
+    fn basic_zkp_success() {
+        let example = ExampleB {
+            a: Scalar::from(42u64),
+            b: Scalar::from(5u64),
+        };
+        let (commit, blind) = PedersonCommitment::<RistrettoPoint, ExampleB>::commit(
+            &example,
+            &mut rand::thread_rng(),
+        );
+        let proof = commit.prove_opening(&example, blind);
+        commit.verify_opening(&proof).unwrap();
+    }
+
+    #[test]
+    fn basic_zkp_fail() {
+        let example = ExampleB {
+            a: Scalar::from(42u64),
+            b: Scalar::from(5u64),
+        };
+        let (commit, blind) = PedersonCommitment::<RistrettoPoint, ExampleB>::commit(
+            &example,
+            &mut rand::thread_rng(),
+        );
+        let proof = commit.prove_opening(&example, blind);
+
+        let bad_example = ExampleB {
+            a: Scalar::from(42u64),
+            b: Scalar::from(6u64),
+        };
+        let bad_commit =
+            PedersonCommitment::<RistrettoPoint, ExampleB>::commit_with_blind(&bad_example, blind);
+        let Err(lox_zkp::ProofError::VerificationFailure) = bad_commit.verify_opening(&proof)
+        else {
+            panic!("verify did not fail with verification failure");
         };
     }
 }
