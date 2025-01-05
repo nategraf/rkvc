@@ -480,8 +480,6 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
                 None => Err(VerifyError::MalformedProof),
             })
         })
-        // TODO: Identity is likely to be rejected by bulletproofs, figure out what padding to use
-        // here.
         .chain((0..).map(|_| Ok(CompressedRistretto::identity())))
         .take(Double::<Msg::N>::USIZE)
         .collect::<Result<_, _>>()?;
@@ -518,7 +516,7 @@ mod test {
         a: Scalar,
         b: u32,
         c: u64,
-        //d: u8,
+        d: u8,
     }
 
     #[test]
@@ -527,7 +525,7 @@ mod test {
             a: Scalar::from(42u64),
             b: 5,
             c: 6,
-            //d: 7,
+            d: 7,
         };
         let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
             &example,
@@ -545,7 +543,7 @@ mod test {
             a: Scalar::from(42u64),
             b: 5,
             c: 6,
-            //d: 7,
+            d: 7,
         };
         let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
             &example,
@@ -557,7 +555,7 @@ mod test {
             a: Scalar::from(42u64),
             b: 5,
             c: 7,
-            //d: 8,
+            d: 8,
         };
         let bad_commit =
             PedersonCommitment::<RistrettoPoint, Example>::commit_with_blind(&bad_example, blind);
