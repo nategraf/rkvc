@@ -141,15 +141,15 @@ impl From<crate::zkp::ProofError> for VerifyError {
     }
 }
 
-impl<Msg> PoK<RistrettoPoint, Msg>
-where
-    Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
-{
+impl<Msg> PoK<RistrettoPoint, Msg> {
     pub fn prove(
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
         msg: &Msg,
         blind: RistrettoScalar,
-    ) -> Result<BulletPoK<Msg>, ProveError> {
+    ) -> Result<BulletPoK<Msg>, ProveError>
+    where
+        Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
+    {
         // TODO: Make these labels configurable / move transcript to arguments.
         let mut transcript = Transcript::new(b"rkvc::range::PoK::transcript");
         let mut prover = Prover::new(b"rkvc::range::PoK::constraints", &mut transcript);
@@ -264,7 +264,10 @@ where
     pub fn verify(
         proof: &BulletPoK<Msg>,
         commit: &PedersonCommitment<CompressedRistretto, Msg>,
-    ) -> Result<(), VerifyError> {
+    ) -> Result<(), VerifyError>
+    where
+        Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
+    {
         // TODO: Make these labels configurable / move transcript to arguments.
         let mut transcript = Transcript::new(b"rkvc::range::PoK::transcript");
         let mut verifier = Verifier::new(b"rkvc::range::PoK::constraints", &mut transcript);
