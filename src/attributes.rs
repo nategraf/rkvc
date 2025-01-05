@@ -9,7 +9,7 @@ pub use typenum;
 pub trait VisitorOutput {
     type Output;
 
-    type StaticOutput;
+    type TypeOutput;
 }
 
 // TODO: Split into a Visitor and a VisitorMut trait? This might help resolve some of the
@@ -20,7 +20,7 @@ pub trait Visitor<T>: VisitorOutput {
     fn visit(&mut self, value: T) -> Self::Output;
 
     // TODO: Find a better name for this after having some examples of using it.
-    fn visit_static(&mut self) -> Self::StaticOutput {
+    fn visit_static(&mut self) -> Self::TypeOutput {
         unimplemented!("visitor does not implement visit_static")
     }
 }
@@ -37,7 +37,7 @@ impl<T> VisitorOutput for UintEncoder<T> {
     type Output = T;
 
     /// UintEncoder does not implement visit_static.
-    type StaticOutput = Infallible;
+    type TypeOutput = Infallible;
 }
 
 macro_rules! impl_visitor_uint_encoder {
@@ -76,7 +76,7 @@ impl<T> VisitorOutput for Identity<T> {
     type Output = T;
 
     /// UintEncoder does not implement visit_static.
-    type StaticOutput = Infallible;
+    type TypeOutput = Infallible;
 }
 
 impl<T: Copy> Visitor<T> for Identity<T> {
@@ -118,11 +118,11 @@ where
         (0..Self::N::USIZE).map(move |i| self.attribute_at(i, visitor.borrow_mut()).unwrap())
     }
 
-    fn attribute_type_at(i: usize, visitor: &mut V) -> Option<V::StaticOutput>;
+    fn attribute_type_at(i: usize, visitor: &mut V) -> Option<V::TypeOutput>;
 
     fn attribute_type_walk(
         mut visitor: impl BorrowMut<V>,
-    ) -> impl ExactSizeIterator<Item = V::StaticOutput> {
+    ) -> impl ExactSizeIterator<Item = V::TypeOutput> {
         (0..Self::N::USIZE).map(move |i| Self::attribute_type_at(i, visitor.borrow_mut()).unwrap())
     }
 
@@ -138,6 +138,21 @@ where
         V: Default,
     {
         itertools::zip_eq(Self::label_iter(), self.attribute_walk(V::default()))
+    }
+
+    fn encode_attribute_types() -> impl ExactSizeIterator<Item = V::TypeOutput>
+    where
+        V: Default,
+    {
+        Self::attribute_type_walk(V::default())
+    }
+
+    fn encode_attributes_types_labeled(
+    ) -> impl ExactSizeIterator<Item = (&'static str, V::TypeOutput)>
+    where
+        V: Default,
+    {
+        itertools::zip_eq(Self::label_iter(), Self::attribute_type_walk(V::default()))
     }
 }
 
