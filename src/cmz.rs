@@ -337,7 +337,7 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
         (presentation, proof)
     }
 
-    /// Adds the constraints for the presentation to an existing proving, in order to compose with
+    /// Adds the constraints for the presentation to an existing prover, in order to compose with
     /// other statements being proven.
     ///
     /// Does not randomize the MAC; [Mac::randomize] should be called seperately.
