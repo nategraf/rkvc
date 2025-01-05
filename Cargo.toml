@@ -26,6 +26,7 @@ lox-zkp = "0.8.1"
 nimue = { version = "0.1.1", default-features = false, features = ["group"] }
 rand = { version = "0.8", features = ["std_rng"] }
 rand_core = { version = "0.6", default-features = false }
+rkvc-derive = { path = "./derive", optional = true }
 subtle = { version = "2.6", default-features = false }
 thiserror = { version = "2.0.9", default-features = false }
 typenum = { version = "1.17.0", features = ["const-generics", "no_std"] }
@@ -40,4 +41,6 @@ rkvc-derive = { path = "./derive" }
 opt-level = 1
 
 [features]
+default = ["derive"]
+derive = ["dep:rkvc-derive"]
 std = []

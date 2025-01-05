@@ -9,6 +9,9 @@ extern crate alloc;
 pub mod attributes;
 pub use attributes::{AttributeCount, AttributeLabels, Attributes, UintEncoder};
 
+#[cfg(feature = "derive")]
+pub use rkvc_derive::Attributes;
+
 pub mod hash;
 pub mod pederson;
 pub(crate) mod zkp;
