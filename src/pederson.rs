@@ -136,27 +136,12 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
 
         let mut transcript = Transcript::new(label!("transcript").as_bytes());
         let mut prover = Prover::new(label!("constraints").as_bytes(), &mut transcript);
-
-        // Constrain C = \Sigma_i m_i * G_i + s * G_blind
-        // TODO: differentiate the labels for the scalar and the point.
-        let mut constraint = Constraint::new();
-        constraint
-            .sum(
-                &mut prover,
-                zip_eq(Msg::label_iter(), Identity::elem_iter(msg)),
-                zip_eq(Msg::label_iter(), self.1.iter().copied()),
-            )
-            .unwrap();
-        constraint
-            .add(
-                &mut prover,
-                (label!("blind"), blind),
-                (label!("blind_gen"), self.0),
-            )
-            .unwrap();
-        constraint
-            .eq(&mut prover, (label!("commit"), commit.elem))
-            .unwrap();
+        self.prove_opening_constraints(
+            &mut prover,
+            commit,
+            &Identity::elem_iter(msg).collect(),
+            blind,
+        );
 
         prover.prove_compact()
     }
@@ -185,23 +170,84 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
 
         let mut transcript = Transcript::new(label!("transcript").as_bytes());
         let mut verifier = Verifier::new(label!("constraints").as_bytes(), &mut transcript);
+        self.constrain_opening(&mut verifier, commit)?;
+
+        verifier.verify_compact(proof)
+    }
+
+    /// Adds the constraints for the commitment opening to an existing prover, in order to compose with
+    /// other statements being proven.
+    pub fn prove_opening_constraints<Msg>(
+        &self,
+        prover: &mut Prover,
+        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        encoded_msg: &GenericArray<RistrettoScalar, Msg::N>,
+        blind: RistrettoScalar,
+    ) where
+        Msg: AttributeLabels,
+    {
+        macro_rules! label {
+            ($s:literal) => {
+                concat!("rkvc::pederson::PedersonGenerators::opening::", $s)
+            };
+        }
+
+        // Constrain C = \Sigma_i m_i * G_i + s * G_blind
+        // TODO: differentiate the labels for the scalar and the point.
+        let mut constraint = Constraint::new();
+        constraint
+            .sum(
+                prover,
+                zip_eq(Msg::label_iter(), encoded_msg.iter().copied()),
+                zip_eq(Msg::label_iter(), self.1.iter().copied()),
+            )
+            .unwrap();
+        constraint
+            .add(
+                prover,
+                (label!("blind"), blind),
+                (label!("blind_gen"), self.0),
+            )
+            .unwrap();
+        constraint
+            .eq(prover, (label!("commit"), commit.elem))
+            .unwrap();
+    }
+
+    /// Verify knowledge of an opening for the given commitment.
+    ///
+    /// Note that the message type must consist entirely of field elements (i.e. it is "identity
+    /// encodable"; it does not contain e.g. u64 fields). Under this constraint, it can be
+    /// guaranteed that the prover has knowledge of a valid message, as all field elements  are
+    /// valid.
+    ///
+    /// This function is paired with [PedersonGenerators::prove_opening].
+    pub fn constrain_opening<Msg>(
+        &self,
+        verifier: &mut Verifier,
+        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+    ) -> Result<(), ProofError>
+    where
+        Msg: AttributeLabels,
+    {
+        macro_rules! label {
+            ($s:literal) => {
+                concat!("rkvc::pederson::PedersonGenerators::opening::", $s)
+            };
+        }
 
         // Constrain C = \Sigma_i m_i * G_i + s * G_blind
         // TODO: differentiate the labels for the scalar and the point.
         let mut constraint = Constraint::new();
         constraint.sum(
-            &mut verifier,
+            verifier,
             Msg::label_iter(),
             zip_eq(Msg::label_iter(), self.1.iter().copied()),
         )?;
-        constraint.add(
-            &mut verifier,
-            label!("blind"),
-            (label!("blind_gen"), self.0),
-        )?;
-        constraint.eq(&mut verifier, (label!("commit"), commit.elem))?;
+        constraint.add(verifier, label!("blind"), (label!("blind_gen"), self.0))?;
+        constraint.eq(verifier, (label!("commit"), commit.elem))?;
 
-        verifier.verify_compact(proof)
+        Ok(())
     }
 }
 
