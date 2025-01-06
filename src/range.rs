@@ -76,8 +76,6 @@ impl<F: Field> Visitor<&F> for RangeProofEncoder<F> {
     }
 }
 
-pub struct PoK<G, Msg>(PhantomData<G>, PhantomData<Msg>);
-
 pub struct Bulletproof<Msg: AttributeCount> {
     /// A Bulletproof ensuring that each attribute in the message is in its expected range.
     bulletproof: Option<bulletproofs::RangeProof>,
@@ -141,7 +139,7 @@ impl From<crate::zkp::ProofError> for VerifyError {
     }
 }
 
-impl<Msg> PoK<RistrettoPoint, Msg> {
+impl<Msg: AttributeCount> Bulletproof<Msg> {
     pub fn prove(
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
         msg: &Msg,
@@ -268,7 +266,7 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
         transcript: &mut Transcript,
         commits: GenericArray<Option<RistrettoPoint>, Msg::N>,
         openings: GenericArray<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N>,
-    ) -> Result<Bulletproof<Msg>, ProveError>
+    ) -> Result<Self, ProveError>
     where
         Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
         Msg::N: Shl<typenum::B1>,
@@ -336,7 +334,7 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
             &mut rand::thread_rng(),
         )?;
 
-        Ok(Bulletproof {
+        Ok(Self {
             bulletproof: Some(bulletproof),
             bulletproof_commits: commits_compressed,
             _phantom_msg: PhantomData,
@@ -344,7 +342,7 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
     }
 
     pub fn verify(
-        proof: &Bulletproof<Msg>,
+        &self,
         schnorr_proof: &SchnorrProof,
         commit: &PedersonCommitment<CompressedRistretto, Msg>,
     ) -> Result<(), VerifyError>
@@ -362,11 +360,11 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
         // commitment (it is verified with a range proof check in constrain_attribute_ranges).
         let attribute_vars: GenericArray<_, Msg::N> = verifier.alloc_scalars(Msg::label_iter())?;
         commit.constrain_opening(&mut verifier, &attribute_vars)?;
-        Self::constrain_range_commit_opening(&mut verifier, proof, &attribute_vars)?;
+        self.constrain_range_commit_opening(&mut verifier, &attribute_vars)?;
 
         // NOTE: Uses rand::thread_rng internally, in combination with witness data.
         verifier.verify_compact(schnorr_proof)?;
-        Self::verify_bulletproof(&mut transcript, proof)?;
+        self.verify_range_proof(&mut transcript)?;
 
         Ok(())
     }
@@ -379,8 +377,8 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
     /// NOTE: Does not verify the given bulletproof or otherwise check the range of the scalars.
     /// [Self::verify_bulletproof] needs to be called to complete the verification.
     pub fn constrain_range_commit_opening<X>(
+        &self,
         verifier: &mut Verifier,
-        proof: &Bulletproof<Msg>,
         attribute_vars: &GenericArray<X, Msg::N>,
     ) -> Result<(), VerifyError>
     where
@@ -421,7 +419,7 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
         // Populate the constraints proving knowledge of an opening for the bulletproof value
         // commitments, and their linkage to the main commitment.
         let iter = zip_eq(
-            proof.bulletproof_commits.iter(),
+            self.bulletproof_commits.iter(),
             zip_eq(
                 attribute_vars.iter().copied(),
                 Msg::encode_attributes_types_labeled(),
@@ -446,10 +444,7 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
         Ok(())
     }
 
-    pub fn verify_bulletproof(
-        transcript: &mut Transcript,
-        proof: &Bulletproof<Msg>,
-    ) -> Result<(), VerifyError>
+    pub fn verify_range_proof(&self, transcript: &mut Transcript) -> Result<(), VerifyError>
     where
         Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
         Msg::N: Shl<typenum::B1>,
@@ -472,7 +467,7 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
         // bulletproofs. We also need to pad up to the nearest power of two.
         let bulletproof_commits: GenericArray<CompressedRistretto, Double<Msg::N>> = zip_eq(
             Msg::encode_attribute_types(),
-            proof.bulletproof_commits.as_slice(),
+            self.bulletproof_commits.as_slice(),
         )
         .filter_map(|(bits, commit)| {
             bits.map(|_| match commit {
@@ -486,12 +481,12 @@ impl<Msg> PoK<RistrettoPoint, Msg> {
 
         // Verify the bulletproof, ensuring the range checks are enforced.
         if let Some(bits_max) = bits_max {
-            let bulletproof = proof
+            let bulletproof = self
                 .bulletproof
                 .as_ref()
                 .ok_or(VerifyError::MalformedProof)?;
             bulletproof.verify_multiple_with_rng(
-                &BulletproofGens::new(bits_max as usize, proof.bulletproof_commits.len()),
+                &BulletproofGens::new(bits_max as usize, self.bulletproof_commits.len()),
                 &Default::default(),
                 transcript,
                 &bulletproof_commits[..check_count.next_power_of_two()],
@@ -508,7 +503,7 @@ mod test {
     use curve25519_dalek::{RistrettoPoint, Scalar};
     use rkvc_derive::Attributes;
 
-    use super::{PoK, VerifyError};
+    use super::{Bulletproof, VerifyError};
     use crate::pederson::PedersonCommitment;
 
     #[derive(Attributes)]
@@ -531,9 +526,10 @@ mod test {
             &example,
             &mut rand::thread_rng(),
         );
-        let proof = PoK::<RistrettoPoint, Example>::prove(&commit, &example, blind).unwrap();
-
-        PoK::<RistrettoPoint, Example>::verify(&proof.0, &proof.1, &commit.compress()).unwrap();
+        let (bulletproof, schnorr_proof) = Bulletproof::prove(&commit, &example, blind).unwrap();
+        bulletproof
+            .verify(&schnorr_proof, &commit.compress())
+            .unwrap();
     }
 
     // TODO: Create a test that will violate the range check.
@@ -549,7 +545,7 @@ mod test {
             &example,
             &mut rand::thread_rng(),
         );
-        let proof = PoK::<RistrettoPoint, Example>::prove(&commit, &example, blind).unwrap();
+        let (bulletproof, schnorr_proof) = Bulletproof::prove(&commit, &example, blind).unwrap();
 
         let bad_example = Example {
             a: Scalar::from(42u64),
@@ -560,7 +556,7 @@ mod test {
         let bad_commit =
             PedersonCommitment::<RistrettoPoint, Example>::commit_with_blind(&bad_example, blind);
         let Err(VerifyError::ZkpError(crate::zkp::ProofError::VerificationFailure)) =
-            PoK::<RistrettoPoint, Example>::verify(&proof.0, &proof.1, &bad_commit.compress())
+            bulletproof.verify(&schnorr_proof, &bad_commit.compress())
         else {
             panic!("verify did not fail with verification failure");
         };

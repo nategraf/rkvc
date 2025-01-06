@@ -2,6 +2,7 @@ use anyhow::Result;
 use curve25519_dalek::{ristretto::CompressedRistretto, RistrettoPoint, Scalar};
 use rkvc::{
     cmz::{Key, Mac, PublicParameters},
+    range::Bulletproof,
     zkp::{Prover, Transcript, Verifier},
     Attributes, UintEncoder,
 };
@@ -49,7 +50,7 @@ impl Credential {
             &mut rand::thread_rng(),
         );
         let (bulletproof_commits, bulletproof_openings) =
-            rkvc::range::PoK::prove_range_commit_constaints(
+            Bulletproof::prove_range_commit_constaints(
                 &mut prover,
                 &msg_variables,
                 &self.attributes,
@@ -57,7 +58,7 @@ impl Credential {
 
         // NOTE: Uses rand::thread_rng internally, in conmbination with witness data.
         let schnorr_proof = prover.prove_compact();
-        let bulletproof = rkvc::range::PoK::prove_bulletproof(
+        let bulletproof = Bulletproof::prove_bulletproof(
             &mut transcript,
             bulletproof_commits,
             bulletproof_openings,
@@ -105,15 +106,15 @@ impl Issuer {
         let msg_variables = self
             .key
             .constrain_presentation(&mut verifier, &presentation.presentation)?;
-        rkvc::range::PoK::constrain_range_commit_opening(
-            &mut verifier,
-            &presentation.bulletproof,
-            &msg_variables,
-        )?;
+        presentation
+            .bulletproof
+            .constrain_range_commit_opening(&mut verifier, &msg_variables)?;
 
         // NOTE: Uses rand::thread_rng internally, in conmbination with witness data.
         verifier.verify_compact(&presentation.schnorr_proof)?;
-        rkvc::range::PoK::verify_bulletproof(&mut transcript, &presentation.bulletproof)?;
+        presentation
+            .bulletproof
+            .verify_range_proof(&mut transcript)?;
         Ok(())
     }
 
