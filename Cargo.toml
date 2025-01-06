@@ -8,11 +8,13 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
 
 [package]
 name = "rkvc"
 version = { workspace = true }
 edition = { workspace = true }
+license = { workspace = true }
 
 [dependencies]
 blake2 = { version = "0.10.6", default-features = false }
@@ -25,7 +27,7 @@ group = { version = "0.13.0", default-features = false, features = ["rand"] }
 itertools = "0.13.0"
 lox-zkp = "0.8.1"
 nimue = { version = "0.1.1", default-features = false, features = ["group"] }
-rand = { version = "0.8", default = false, features = ["std_rng"] }
+rand = { version = "0.8", default-features = false, features = ["std_rng"] }
 rand_core = { version = "0.6", default-features = false }
 rkvc-derive = { path = "./derive", optional = true }
 subtle = { version = "2.6", default-features = false }
