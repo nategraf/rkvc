@@ -17,7 +17,7 @@ use crate::{
     attributes::{AttributeCount, Attributes, Identity, UintEncoder},
     pederson::{PedersonCommitment, PedersonGenerators},
     zkp::{
-        AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover,
+        AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover, SchnorrCS,
         Transcript, Verifier,
     },
 };
@@ -195,11 +195,11 @@ where
 
     // NOTE: This function exists as a partial answer to the comments above on the Identity
     // trait bound for Msg. TODO: Should it be moved as a member of the presentation.
-    pub fn constrain_presentation(
+    pub fn constrain_presentation<'a>(
         &self,
-        verifier: &mut Verifier,
+        verifier: &mut Verifier<'a>,
         pres: &Presentation<CompressedRistretto, Msg>,
-    ) -> Result<(), Error> {
+    ) -> Result<GenericArray<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg::N>, Error> {
         let u = pres.u.decompress().ok_or(Error::DecompressFailed)?;
         // NOTE: Unwrapping the CtChoice is ok here because U is non-private.
         if u.is_identity().into() {
@@ -219,14 +219,14 @@ where
                 .into_iter()
                 .sum::<RistrettoPoint>();
 
-        constrain_presentation(
+        let m_vars = constrain_presentation(
             verifier,
             pres.u,
             z,
             &self.public_parameters().compress(),
             &pres.commit_msg,
         )?;
-        Ok(())
+        Ok(m_vars)
     }
 }
 
@@ -326,7 +326,7 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
             b"rkvc::cmz::Mac::presentation::constraints",
             &mut transcript,
         );
-        let presentation = self.prove_presentation_constraints(
+        let (presentation, _) = self.prove_presentation_constraints(
             &mut prover,
             &msg.encode_attributes().collect(),
             pp,
@@ -341,13 +341,16 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
     /// other statements being proven.
     ///
     /// Does not randomize the MAC; [Mac::randomize] should be called seperately.
-    pub fn prove_presentation_constraints<R>(
+    pub fn prove_presentation_constraints<'a, R>(
         &self,
-        prover: &mut Prover,
+        prover: &mut Prover<'a>,
         msg_encoded: &GenericArray<RistrettoScalar, Msg::N>,
         pp: &PublicParameters<RistrettoPoint, Msg>,
         rng: &mut R,
-    ) -> Presentation<CompressedRistretto, Msg>
+    ) -> (
+        Presentation<CompressedRistretto, Msg>,
+        GenericArray<<Prover<'a> as SchnorrCS>::ScalarVar, Msg::N>,
+    )
     where
         R: CryptoRngCore + ?Sized,
         Msg: AttributeCount,
@@ -369,24 +372,38 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
 
         // Add constraints to the prover for the correctness of the presentation.
         // NOTE: Unwrap will never panic, prove_presentation_constraints is infallible.
-        prove_presentation_constraints(prover, self.u, r_v, z, &r, msg_encoded, pp, &commit_msg)
-            .unwrap();
+        let m_vars = prove_presentation_constraints(
+            prover,
+            self.u,
+            r_v,
+            z,
+            &r,
+            msg_encoded,
+            pp,
+            &commit_msg,
+        )
+        .unwrap();
 
-        Presentation {
-            u: self.u.compress(),
-            commit_v: commit_v.compress(),
-            commit_msg: commit_msg.iter().map(|c| c.compress()).collect(),
-        }
+        (
+            Presentation {
+                u: self.u.compress(),
+                commit_v: commit_v.compress(),
+                commit_msg: commit_msg.iter().map(|c| c.compress()).collect(),
+            },
+            m_vars,
+        )
     }
 }
 
-fn constrain_presentation<Msg: AttributeCount>(
-    verifier: &mut Verifier,
+// TODO: Is it better to take the scalar vars as an argument, or return them as is done here? The
+// API is not consistent across the board.
+fn constrain_presentation<'a, Msg: AttributeCount>(
+    verifier: &mut Verifier<'a>,
     u: CompressedRistretto,
     z: RistrettoPoint,
     pp: &PublicParameters<CompressedRistretto, Msg>,
     commit_msg: &GenericArray<CompressedRistretto, Msg::N>,
-) -> Result<(), crate::zkp::ProofError> {
+) -> Result<GenericArray<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg::N>, crate::zkp::ProofError> {
     // A small macro to construct the labels for variables that get added to the transcript.
     macro_rules! label {
         ($s:literal) => {
@@ -417,19 +434,25 @@ fn constrain_presentation<Msg: AttributeCount>(
     constraint_z.eq(verifier, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
-    for (r_i_var, c_i) in zip_eq(r_vars.as_slice(), commit_msg.as_slice()) {
+    let m_vars: GenericArray<_, Msg::N> =
+        verifier.alloc_scalars((0..Msg::N::USIZE).map(|_| label!("m_i")))?;
+    for (r_i_var, (m_var, c_i)) in zip_eq(
+        r_vars.as_slice(),
+        zip_eq(m_vars.iter(), commit_msg.as_slice()),
+    ) {
         let mut constraint_c_i = Constraint::new();
-        constraint_c_i.add(verifier, label!("m_i"), u_var)?;
+        constraint_c_i.add(verifier, *m_var, u_var)?;
         constraint_c_i.add(verifier, *r_i_var, g_var)?;
         constraint_c_i.eq(verifier, (label!("c_i"), *c_i))?;
     }
 
-    Ok(())
+    // Return the m variables to use in further constraints.
+    Ok(m_vars)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn prove_presentation_constraints<Msg>(
-    prover: &mut Prover,
+fn prove_presentation_constraints<'a, Msg>(
+    prover: &mut Prover<'a>,
     u: RistrettoPoint,
     r_v: RistrettoScalar,
     z: RistrettoPoint,
@@ -437,7 +460,7 @@ fn prove_presentation_constraints<Msg>(
     msg: &GenericArray<RistrettoScalar, Msg::N>,
     pp: &PublicParameters<RistrettoPoint, Msg>,
     commit_msg: &GenericArray<RistrettoPoint, Msg::N>,
-) -> Result<(), Infallible>
+) -> Result<GenericArray<<Prover<'a> as SchnorrCS>::ScalarVar, Msg::N>, Infallible>
 where
     Msg: AttributeCount,
 {
@@ -469,18 +492,20 @@ where
     constraint_z.eq(prover, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
+    let m_vars: GenericArray<_, Msg::N> =
+        prover.alloc_scalars(msg.iter().map(|m_i| (label!("m_i"), *m_i)))?;
     let iter = zip_eq(
-        zip_eq(msg.as_slice(), r_vars.as_slice()),
+        zip_eq(m_vars.as_slice(), r_vars.as_slice()),
         commit_msg.as_slice(),
     );
     for ((m_i, r_i_var), c_i) in iter {
         let mut constraint_c_i = Constraint::new();
-        constraint_c_i.add(prover, (label!("m_i"), *m_i), u_var)?;
+        constraint_c_i.add(prover, *m_i, u_var)?;
         constraint_c_i.add(prover, *r_i_var, g_var)?;
         constraint_c_i.eq(prover, (label!("c_i"), *c_i))?;
     }
 
-    Ok(())
+    Ok(m_vars)
 }
 
 #[cfg(test)]
