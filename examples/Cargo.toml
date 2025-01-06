@@ -6,6 +6,7 @@ license = { workspace = true }
 
 [dependencies]
 anyhow = "1.0.95"
+blake2 = "0.10.6"
 curve25519-dalek = "4.1"
 rand = "0.8"
 rkvc = { path = ".." }

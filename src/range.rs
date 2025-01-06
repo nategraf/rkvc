@@ -76,16 +76,17 @@ impl<F: Field> Visitor<&F> for RangeProofEncoder<F> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Bulletproof<Msg: AttributeCount> {
     /// A Bulletproof ensuring that each attribute in the message is in its expected range.
-    bulletproof: Option<bulletproofs::RangeProof>,
+    pub bulletproof: Option<bulletproofs::RangeProof>,
     /// Commitments to range-constrained scalars in the message attributes, each using the same
     /// pair of Pederson commitment generators such that they can be constrained by a single
     /// bulletproof.
     ///
     /// Attributes of the native field type do not need a range check commitment, and so the
     /// respective index in this array will be populated with `None`.
-    bulletproof_commits: GenericArray<Option<CompressedRistretto>, Msg::N>,
+    pub bulletproof_commits: GenericArray<Option<CompressedRistretto>, Msg::N>,
     _phantom_msg: PhantomData<Msg>,
 }
 

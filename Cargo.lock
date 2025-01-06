@@ -503,6 +503,7 @@ name = "rkvc-examples"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake2",
  "curve25519-dalek",
  "rand",
  "rkvc",
