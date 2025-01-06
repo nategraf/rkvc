@@ -14,7 +14,7 @@ pub use rkvc_derive::Attributes;
 
 pub mod hash;
 pub mod pederson;
-pub(crate) mod zkp;
+pub mod zkp;
 
 // TODO: Remove these
 pub mod range;

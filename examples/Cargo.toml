@@ -1,0 +1,10 @@
+[package]
+name = "rkvc-examples"
+version = { workspace = true }
+edition = { workspace = true }
+
+[dependencies]
+anyhow = "1.0.95"
+curve25519-dalek = "4.1"
+rand = "0.8"
+rkvc = { path = ".." }
