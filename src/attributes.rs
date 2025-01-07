@@ -6,22 +6,20 @@ use typenum::Unsigned;
 // Re-export typenum so that the derive macro has a stable path to it.
 pub use typenum;
 
-pub trait VisitorOutput {
+pub trait EncoderOutput {
     type Output;
 
     type TypeOutput;
 }
 
-// TODO: Split into a Visitor and a VisitorMut trait? This might help resolve some of the
-// awkwardness of e.g. the AttributeElems::attribute_at method.
-// TODO: Rename this to Encoder and remove the &mut on self? Revisit this after implementing proof
-// of knowledge with range tours.
-pub trait Visitor<T>: VisitorOutput {
-    fn visit(&mut self, value: T) -> Self::Output;
+// TODO: Split into a Encoder and a EncoderMut trait? This might help resolve some of the
+// awkwardness of e.g. the AttributeElems::attribute_at method. So far no implementation uses the
+// mutability, and this may be the better practice.
+pub trait Encoder<T>: EncoderOutput {
+    fn encode_value(&mut self, value: T) -> Self::Output;
 
-    // TODO: Find a better name for this after having some examples of using it.
-    fn visit_static(&mut self) -> Self::TypeOutput {
-        unimplemented!("visitor does not implement visit_static")
+    fn encode_type(&mut self) -> Self::TypeOutput {
+        unimplemented!("encoder does not implement encode_type")
     }
 }
 
@@ -33,22 +31,22 @@ impl<T> Default for UintEncoder<T> {
     }
 }
 
-impl<T> VisitorOutput for UintEncoder<T> {
+impl<T> EncoderOutput for UintEncoder<T> {
     type Output = T;
 
-    /// UintEncoder does not implement visit_static.
+    /// UintEncoder does not implement encode_static.
     type TypeOutput = Infallible;
 }
 
-macro_rules! impl_visitor_uint_encoder {
+macro_rules! impl_encoder_uint_encoder {
     ($($t:ty),*) => {
         $(
-            impl<T> Visitor<$t> for UintEncoder<T>
+            impl<T> Encoder<$t> for UintEncoder<T>
             where
                 $t: Into<T>,
             {
                 #[inline]
-                fn visit(&mut self, value: $t) -> Self::Output {
+                fn encode_value(&mut self, value: $t) -> Self::Output {
                     value.into()
                 }
             }
@@ -56,10 +54,10 @@ macro_rules! impl_visitor_uint_encoder {
     };
 }
 
-impl_visitor_uint_encoder!(u8, u16, u32, u64, u128);
+impl_encoder_uint_encoder!(u8, u16, u32, u64, u128);
 
-impl<T: Clone> Visitor<&T> for UintEncoder<T> {
-    fn visit(&mut self, value: &T) -> Self::Output {
+impl<T: Clone> Encoder<&T> for UintEncoder<T> {
+    fn encode_value(&mut self, value: &T) -> Self::Output {
         value.clone()
     }
 }
@@ -72,23 +70,23 @@ impl<T> Default for Identity<T> {
     }
 }
 
-impl<T> VisitorOutput for Identity<T> {
+impl<T> EncoderOutput for Identity<T> {
     type Output = T;
 
-    /// UintEncoder does not implement visit_static.
+    /// UintEncoder does not implement encode_type.
     type TypeOutput = Infallible;
 }
 
-impl<T: Copy> Visitor<T> for Identity<T> {
+impl<T: Copy> Encoder<T> for Identity<T> {
     #[inline]
-    fn visit(&mut self, value: T) -> Self::Output {
+    fn encode_value(&mut self, value: T) -> Self::Output {
         value
     }
 }
 
-impl<T: Clone> Visitor<&T> for Identity<T> {
+impl<T: Clone> Encoder<&T> for Identity<T> {
     #[inline]
-    fn visit(&mut self, value: &T) -> Self::Output {
+    fn encode_value(&mut self, value: &T) -> Self::Output {
         value.clone()
     }
 }
@@ -105,54 +103,54 @@ pub trait AttributeLabels: AttributeCount {
     }
 }
 
-pub trait Attributes<V>: AttributeLabels
+pub trait Attributes<E>: AttributeLabels
 where
-    V: VisitorOutput,
+    E: EncoderOutput,
 {
-    fn attribute_at(&self, i: usize, visitor: &mut V) -> Option<V::Output>;
+    fn attribute_at(&self, i: usize, encoder: &mut E) -> Option<E::Output>;
 
     fn attribute_walk(
         &self,
-        mut visitor: impl BorrowMut<V>,
-    ) -> impl ExactSizeIterator<Item = V::Output> {
-        (0..Self::N::USIZE).map(move |i| self.attribute_at(i, visitor.borrow_mut()).unwrap())
+        mut encoder: impl BorrowMut<E>,
+    ) -> impl ExactSizeIterator<Item = E::Output> {
+        (0..Self::N::USIZE).map(move |i| self.attribute_at(i, encoder.borrow_mut()).unwrap())
     }
 
-    fn attribute_type_at(i: usize, visitor: &mut V) -> Option<V::TypeOutput>;
+    fn attribute_type_at(i: usize, encoder: &mut E) -> Option<E::TypeOutput>;
 
     fn attribute_type_walk(
-        mut visitor: impl BorrowMut<V>,
-    ) -> impl ExactSizeIterator<Item = V::TypeOutput> {
-        (0..Self::N::USIZE).map(move |i| Self::attribute_type_at(i, visitor.borrow_mut()).unwrap())
+        mut encoder: impl BorrowMut<E>,
+    ) -> impl ExactSizeIterator<Item = E::TypeOutput> {
+        (0..Self::N::USIZE).map(move |i| Self::attribute_type_at(i, encoder.borrow_mut()).unwrap())
     }
 
-    fn encode_attributes(&self) -> impl ExactSizeIterator<Item = V::Output>
+    fn encode_attributes(&self) -> impl ExactSizeIterator<Item = E::Output>
     where
-        V: Default,
+        E: Default,
     {
-        self.attribute_walk(V::default())
+        self.attribute_walk(E::default())
     }
 
-    fn encode_attributes_labeled(&self) -> impl ExactSizeIterator<Item = (&'static str, V::Output)>
+    fn encode_attributes_labeled(&self) -> impl ExactSizeIterator<Item = (&'static str, E::Output)>
     where
-        V: Default,
+        E: Default,
     {
-        itertools::zip_eq(Self::label_iter(), self.attribute_walk(V::default()))
+        itertools::zip_eq(Self::label_iter(), self.attribute_walk(E::default()))
     }
 
-    fn encode_attribute_types() -> impl ExactSizeIterator<Item = V::TypeOutput>
+    fn encode_attribute_types() -> impl ExactSizeIterator<Item = E::TypeOutput>
     where
-        V: Default,
+        E: Default,
     {
-        Self::attribute_type_walk(V::default())
+        Self::attribute_type_walk(E::default())
     }
 
     fn encode_attributes_types_labeled(
-    ) -> impl ExactSizeIterator<Item = (&'static str, V::TypeOutput)>
+    ) -> impl ExactSizeIterator<Item = (&'static str, E::TypeOutput)>
     where
-        V: Default,
+        E: Default,
     {
-        itertools::zip_eq(Self::label_iter(), Self::attribute_type_walk(V::default()))
+        itertools::zip_eq(Self::label_iter(), Self::attribute_type_walk(E::default()))
     }
 }
 

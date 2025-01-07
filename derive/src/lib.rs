@@ -52,7 +52,7 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         unimplemented!("Not implemented for empty structs");
     }
 
-    // Collect all the types found on fields in the struct, as they will presented to the visitor.
+    // Collect all the types found on fields in the struct, as they will presented to the encoder.
     // Primitve types (i.e. uints, ints, bool, char) passed by value, others passed by reference.
     let attribute_types_res: Result<Vec<_>, _> = fields
         .iter()
@@ -79,8 +79,8 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         }
     };
 
-    // Construct the argument(s) to the visit methods. Take a refernce if
-    let visit_field_args: Vec<_> = std::iter::zip(
+    // Construct the argument(s) to the encode methods. Take a refernce if
+    let encode_value_args: Vec<_> = std::iter::zip(
         fields
         .iter(),
         attribute_types.iter())
@@ -95,9 +95,9 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         .collect();
 
     // Collect all the unique types found on fields in the struct, and render them into the type
-    // bounds that will be applied to the visitor type on the Attributes implementation. Generate a
-    // type bound on e.g. Visitor<u64> for primitive types Visitor<&T> for all other types.
-    let visitor_type_bounds: Vec<_> = std::iter::zip(
+    // bounds that will be applied to the encoder type on the Attributes implementation. Generate a
+    // type bound on e.g. Encoder<u64> for primitive types Encoder<&T> for all other types.
+    let encoder_type_bounds: Vec<_> = std::iter::zip(
             fields.iter().map(|f| f.ty.clone()),
             attribute_types.iter().cloned()
         )
@@ -105,8 +105,8 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         .into_iter()
         .map(|(ty, attr_ty)|
             match attr_ty {
-                Type::Path(_) => quote_spanned!(ty.span() => #rkvc_path::attributes::Visitor<#ty>),
-                Type::Reference(_) => quote_spanned!(ty.span() => for<'a> #rkvc_path::attributes::Visitor<&'a #ty>),
+                Type::Path(_) => quote_spanned!(ty.span() => #rkvc_path::attributes::Encoder<#ty>),
+                Type::Reference(_) => quote_spanned!(ty.span() => for<'a> #rkvc_path::attributes::Encoder<&'a #ty>),
                 _ => unreachable!("macro implementation error: checks failed to ensure exhaustive handling of field types"),
             }
         )
@@ -136,21 +136,21 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl<V> #rkvc_path::Attributes<V> for #struct_name
+        impl<E> #rkvc_path::Attributes<E> for #struct_name
         where
-            V: #rkvc_path::attributes::VisitorOutput,
-            #(V: #visitor_type_bounds,)*
+            E: #rkvc_path::attributes::EncoderOutput,
+            #(E: #encoder_type_bounds,)*
         {
-            fn attribute_at(&self, i: usize, visitor: &mut V) -> Option<V::Output> {
+            fn attribute_at(&self, i: usize, encoder: &mut E) -> Option<E::Output> {
                 match i {
-                    #(#indices => Some(visitor.visit(#visit_field_args)),)*
+                    #(#indices => Some(encoder.encode_value(#encode_value_args)),)*
                     _ => None,
                 }
             }
 
-            fn attribute_type_at(i: usize, visitor: &mut V) -> Option<V::TypeOutput> {
+            fn attribute_type_at(i: usize, encoder: &mut E) -> Option<E::TypeOutput> {
                 match i {
-                    #(#indices => Some(<V as #rkvc_path::attributes::Visitor<#attribute_types>>::visit_static(visitor)),)*
+                    #(#indices => Some(<E as #rkvc_path::attributes::Encoder<#attribute_types>>::encode_type(encoder)),)*
                     _ => None,
                 }
             }

@@ -15,7 +15,7 @@ use itertools::zip_eq;
 use typenum::{Double, Unsigned};
 
 use crate::{
-    attributes::{AttributeCount, Attributes, Visitor, VisitorOutput},
+    attributes::{AttributeCount, Attributes, Encoder, EncoderOutput},
     pederson::PedersonCommitment,
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, ProofError,
@@ -31,7 +31,7 @@ impl<F: Field> Default for RangeProofEncoder<F> {
     }
 }
 
-impl<F: Field> VisitorOutput for RangeProofEncoder<F> {
+impl<F: Field> EncoderOutput for RangeProofEncoder<F> {
     /// Attribute value encoded as a field elem and an optional bit-width constraint. If the
     /// attribute type is the native field, no range check is required and the bit-width will be
     /// None.
@@ -42,21 +42,21 @@ impl<F: Field> VisitorOutput for RangeProofEncoder<F> {
     type TypeOutput = Option<u32>;
 }
 
-macro_rules! impl_visitor_range_proof_encoder {
+macro_rules! impl_encoder_range_proof_encoder {
     ($($t:ty),*) => {
         $(
-            impl<F> Visitor<$t> for RangeProofEncoder<F>
+            impl<F> Encoder<$t> for RangeProofEncoder<F>
             where
                 F: Field,
                 $t: Into<F>,
             {
                 #[inline]
-                fn visit(&mut self, value: $t) -> Self::Output {
+                fn encode_value(&mut self, value: $t) -> Self::Output {
                     (value.into(), Some(<$t>::BITS))
                 }
 
                 #[inline]
-                fn visit_static(&mut self) -> Self::TypeOutput {
+                fn encode_type(&mut self) -> Self::TypeOutput {
                     Some(<$t>::BITS)
                 }
             }
@@ -64,14 +64,14 @@ macro_rules! impl_visitor_range_proof_encoder {
     };
 }
 
-impl_visitor_range_proof_encoder!(u8, u16, u32, u64);
+impl_encoder_range_proof_encoder!(u8, u16, u32, u64);
 
-impl<F: Field> Visitor<&F> for RangeProofEncoder<F> {
-    fn visit(&mut self, value: &F) -> Self::Output {
+impl<F: Field> Encoder<&F> for RangeProofEncoder<F> {
+    fn encode_value(&mut self, value: &F) -> Self::Output {
         (*value, None)
     }
 
-    fn visit_static(&mut self) -> Self::TypeOutput {
+    fn encode_type(&mut self) -> Self::TypeOutput {
         None
     }
 }
