@@ -1,3 +1,5 @@
+//! Hash-to-curve traits used in this crate.
+
 use curve25519_dalek::RistrettoPoint;
 use digest::Digest;
 use typenum::U64;

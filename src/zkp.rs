@@ -1,3 +1,5 @@
+//! Extensions to the [zkp][lox_zkp] crate.
+
 use alloc::vec::Vec;
 use core::convert::Infallible;
 

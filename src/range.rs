@@ -1,5 +1,4 @@
-//! Proof of knowledge for a Pederson commitment opening, with range checks.
-//! NOTE: WIP module to be broken up.
+//! Range proofs applied to structure messages.
 
 use core::{convert::Infallible, marker::PhantomData, ops::Shl};
 
@@ -376,7 +375,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     /// with the given `attribute_vars`.
     ///
     /// NOTE: Does not verify the given bulletproof or otherwise check the range of the scalars.
-    /// [Self::verify_bulletproof] needs to be called to complete the verification.
+    /// [Bulletproof::verify_range_proof] needs to be called to complete the verification.
     pub fn constrain_range_commit_opening<X>(
         &self,
         verifier: &mut Verifier,

@@ -1,3 +1,5 @@
+//! Pederson commitments applied to structured messages.
+
 use core::{convert::Infallible, iter::Sum, marker::PhantomData};
 
 use blake2::Blake2b512;
@@ -14,7 +16,7 @@ use subtle::ConstantTimeEq;
 use typenum::U64;
 
 use crate::{
-    attributes::{AttributeCount, AttributeLabels, Attributes, Identity, UintEncoder},
+    attributes::{AttributeCount, AttributeLabels, Attributes, IdentityEncoder, UintEncoder},
     hash::FromHash,
     zkp::{AllocScalarVar, CompactProof, Constraint, ProofError, Prover, Transcript, Verifier},
 };
@@ -126,7 +128,7 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
         blind: RistrettoScalar,
     ) -> CompactProof
     where
-        Msg: Attributes<Identity<RistrettoScalar>>,
+        Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
         macro_rules! label {
             ($s:literal) => {
@@ -160,7 +162,7 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
         proof: &CompactProof,
     ) -> Result<(), ProofError>
     where
-        Msg: Attributes<Identity<RistrettoScalar>>,
+        Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
         macro_rules! label {
             ($s:literal) => {
@@ -341,7 +343,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     /// This function is paired with [PedersonCommitment::verify_opening].
     pub fn prove_opening(&self, msg: &Msg, blind: RistrettoScalar) -> CompactProof
     where
-        Msg: Attributes<Identity<RistrettoScalar>>,
+        Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
         PedersonGenerators::attributes_default::<Msg>().prove_opening(self, msg, blind)
     }
@@ -357,7 +359,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     /// This function is paired with [PedersonCommitment::prove_opening].
     pub fn verify_opening(&self, proof: &CompactProof) -> Result<(), ProofError>
     where
-        Msg: Attributes<Identity<RistrettoScalar>>,
+        Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
         PedersonGenerators::attributes_default::<Msg>().verify_opening(self, proof)
     }

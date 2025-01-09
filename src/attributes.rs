@@ -1,100 +1,58 @@
+//! Types for encoding structured messages for use in cryptographic protocols.
+//!
+//! This module contains the [Attributes] trait, and associated [Encoder] types. Implementing
+//! [Attributes] on a `struct` allows it to be encoded for use as a message input for algebraic
+//! MACs, commitments, range checks and other cryptographic procedures defined in this crate.
+//!
+//! When the `derive` feature is enabled,
+//!
+//! ```no_run
+//! # // TODO: Fix issue with derive macro and the `crate` reference
+//! # use rkvc_derive::Attributes;
+//! use rkvc::{Attributes, UintEncoder};
+//! use curve25519_dalek::Scalar;
+//!
+//! #[derive(Attributes)]
+//! struct Example {
+//!     a: u32,
+//!     b: u64,
+//!     c: Scalar,
+//! }
+//!
+//! let example = Example {
+//!     a: 10u32,
+//!     b: 11u64,
+//!     c: Scalar::from(12u32),
+//! };
+//!
+//! let attributes: Vec<Scalar> = UintEncoder::encode_attributes(&example).collect();
+//! assert_eq!(
+//!     attributes,
+//!     vec![Scalar::from(10u32), Scalar::from(11u64), Scalar::from(12u32)]
+//! );
+//! ```
 use core::{borrow::BorrowMut, convert::Infallible, marker::PhantomData};
 
 use generic_array::ArrayLength;
 use typenum::Unsigned;
 
+#[cfg(feature = "derive")]
+pub use rkvc_derive::Attributes;
+
 // Re-export typenum so that the derive macro has a stable path to it.
 pub use typenum;
 
-pub trait EncoderOutput {
-    type Output;
-
-    type TypeOutput;
-}
-
-// TODO: Split into a Encoder and a EncoderMut trait? This might help resolve some of the
-// awkwardness of e.g. the AttributeElems::attribute_at method. So far no implementation uses the
-// mutability, and this may be the better practice.
-pub trait Encoder<T>: EncoderOutput {
-    fn encode_value(&mut self, value: T) -> Self::Output;
-
-    fn encode_type(&mut self) -> Self::TypeOutput {
-        unimplemented!("encoder does not implement encode_type")
-    }
-}
-
-pub struct UintEncoder<T>(PhantomData<T>);
-
-impl<T> Default for UintEncoder<T> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<T> EncoderOutput for UintEncoder<T> {
-    type Output = T;
-
-    /// UintEncoder does not implement encode_static.
-    type TypeOutput = Infallible;
-}
-
-macro_rules! impl_encoder_uint_encoder {
-    ($($t:ty),*) => {
-        $(
-            impl<T> Encoder<$t> for UintEncoder<T>
-            where
-                $t: Into<T>,
-            {
-                #[inline]
-                fn encode_value(&mut self, value: $t) -> Self::Output {
-                    value.into()
-                }
-            }
-        )*
-    };
-}
-
-impl_encoder_uint_encoder!(u8, u16, u32, u64, u128);
-
-impl<T: Clone> Encoder<&T> for UintEncoder<T> {
-    fn encode_value(&mut self, value: &T) -> Self::Output {
-        value.clone()
-    }
-}
-
-pub struct Identity<T>(PhantomData<T>);
-
-impl<T> Default for Identity<T> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<T> EncoderOutput for Identity<T> {
-    type Output = T;
-
-    /// UintEncoder does not implement encode_type.
-    type TypeOutput = Infallible;
-}
-
-impl<T: Copy> Encoder<T> for Identity<T> {
-    #[inline]
-    fn encode_value(&mut self, value: T) -> Self::Output {
-        value
-    }
-}
-
-impl<T: Clone> Encoder<&T> for Identity<T> {
-    #[inline]
-    fn encode_value(&mut self, value: &T) -> Self::Output {
-        value.clone()
-    }
-}
-
+/// Count of the fields in the implementing type's [Attributes] encoding.
 pub trait AttributeCount {
     type N: ArrayLength;
 }
 
+/// Labels for each field in the implementing type's [Attributes] encoding.
+///
+/// Labels are used in cryptographic protocols as unique identifiers for the fields. As examples,
+/// the [PedersonCommitment][crate::pederson::PedersonCommitment] implementation uses the labels as
+/// hash-to-curve input to create commitment generators, and the [zkp][crate::zkp] module uses them
+/// as domain separators in the Fiat-Shamir transcript.
 pub trait AttributeLabels: AttributeCount {
     fn label_at(i: usize) -> Option<&'static str>;
 
@@ -103,6 +61,12 @@ pub trait AttributeLabels: AttributeCount {
     }
 }
 
+/// Implementing [Attributes] on a `struct` allows it to be encoded for use as a message input for algebraic
+/// MACs, commitments, range checks and other cryptographic procedures defined in this crate.
+///
+/// Note that the [Attributes] trait is generic with respect to `E`, which is an encoder. When used
+/// in trait bounds (e.g. `Msg: Attributes<UintEncoder>`) this indicates that `Msg` can be any type
+/// that is encodable by the [UintEncoder].
 pub trait Attributes<E>: AttributeLabels
 where
     E: EncoderOutput,
@@ -154,10 +118,129 @@ where
     }
 }
 
+/// Output of the [Encoder] when encoding a field's value, and when encoding metadata about a field
+/// based on it's type (e.g. how many bits are in the value).
+///
+/// Note that a type implementing [Encoder] will provide one implementation per supported field
+/// type, but will only implement [EncoderOutput] once, as all field values should be encoded to
+/// the same output types.
+pub trait EncoderOutput {
+    type Output;
+
+    type TypeOutput;
+
+    /// Encode the attribute values of the given message using a [Default] instance of this type.
+    fn encode_attributes<Msg>(msg: &Msg) -> impl ExactSizeIterator<Item = Self::Output>
+    where
+        Self: Default,
+        Msg: Attributes<Self>,
+    {
+        msg.encode_attributes()
+    }
+
+    /// Encode the attribute types of the given message using a [Default] instance of this type.
+    fn encode_attribute_types<Msg>() -> impl ExactSizeIterator<Item = Self::TypeOutput>
+    where
+        Self: Default,
+        Msg: Attributes<Self>,
+    {
+        Msg::encode_attribute_types()
+    }
+}
+
+// TODO: Split into a Encoder and a EncoderMut trait? This might help resolve some of the
+// awkwardness of e.g. the AttributeElems::attribute_at method. So far no implementation uses the
+// mutability, and this may be the better practice.
+/// An [Encoder] defines a procedure for encoding fields of a message's [Attributes] for input in a
+/// cryptographic operation. Each concrete encoder (e.g. [UintEncoder]) implement this trait
+/// multiple times, with `T` for each supported field type (e.g. u64, &Scalar, bool).
+pub trait Encoder<T>: EncoderOutput {
+    fn encode_value(&mut self, value: T) -> Self::Output;
+
+    fn encode_type(&mut self) -> Self::TypeOutput {
+        unimplemented!("encoder does not implement encode_type")
+    }
+}
+
+/// An [Encoder] that can can can accept any primitive unsigned integer and `T`, and outputs `T`. In
+/// general, `T` will be a finite field. This encoder is injective into from the set of unsigned
+/// integers to the chosen type `T`, so long as the implementation of [`Into<T>`] for each unsigned
+/// integer is injective (generally this is the case).
+pub struct UintEncoder<T>(PhantomData<T>);
+
+impl<T> Default for UintEncoder<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> EncoderOutput for UintEncoder<T> {
+    type Output = T;
+
+    /// UintEncoder does not implement encode_static.
+    type TypeOutput = Infallible;
+}
+
+macro_rules! impl_encoder_uint_encoder {
+    ($($t:ty),*) => {
+        $(
+            impl<T> Encoder<$t> for UintEncoder<T>
+            where
+                $t: Into<T>,
+            {
+                #[inline]
+                fn encode_value(&mut self, value: $t) -> Self::Output {
+                    value.into()
+                }
+            }
+        )*
+    };
+}
+
+impl_encoder_uint_encoder!(u8, u16, u32, u64, u128);
+
+impl<T: Clone> Encoder<&T> for UintEncoder<T> {
+    fn encode_value(&mut self, value: &T) -> Self::Output {
+        value.clone()
+    }
+}
+
+/// A trivial encoder which can accept fields of type `T` and "encodes" them to type `T` trivially.
+///
+/// [IdentityEncoder] is bijective, and so is useful in context, such as a proof of knowledge,
+/// where every encoding must have an unambiguous decoding to a valid message.
+pub struct IdentityEncoder<T>(PhantomData<T>);
+
+impl<T> Default for IdentityEncoder<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> EncoderOutput for IdentityEncoder<T> {
+    type Output = T;
+
+    /// UintEncoder does not implement encode_type.
+    type TypeOutput = Infallible;
+}
+
+impl<T: Copy> Encoder<T> for IdentityEncoder<T> {
+    #[inline]
+    fn encode_value(&mut self, value: T) -> Self::Output {
+        value
+    }
+}
+
+impl<T: Clone> Encoder<&T> for IdentityEncoder<T> {
+    #[inline]
+    fn encode_value(&mut self, value: &T) -> Self::Output {
+        value.clone()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use curve25519_dalek::Scalar;
-    use rkvc_derive::Attributes;
 
     use super::{AttributeLabels, Attributes, UintEncoder};
 

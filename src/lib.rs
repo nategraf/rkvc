@@ -1,3 +1,6 @@
+//! `rvkc` is a library for building anonymous credentials from algerbraic MACs, based on the
+//! techniques described in [Revisiting Keyed-Verification Anonymous Credentials](https://eprint.iacr.org/2024/1552), and in prior works.
+
 #![cfg_attr(not(feature = "std"), no_std)]
 
 // TODO: Add proptests throughout for better coverage.
@@ -7,10 +10,7 @@
 extern crate alloc;
 
 pub mod attributes;
-pub use attributes::{AttributeCount, AttributeLabels, Attributes, UintEncoder};
-
-#[cfg(feature = "derive")]
-pub use rkvc_derive::Attributes;
+pub use attributes::{AttributeCount, AttributeLabels, Attributes, IdentityEncoder, UintEncoder};
 
 pub mod cmz;
 pub mod hash;

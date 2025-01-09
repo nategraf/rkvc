@@ -1,3 +1,5 @@
+//! An implementaion of the µCMZ algerbraic MAC.
+
 use core::{convert::Infallible, marker::PhantomData, ops::Mul};
 
 use blake2::{Blake2b512, Digest};
@@ -14,7 +16,7 @@ use subtle::ConstantTimeEq;
 use typenum::Unsigned;
 
 use crate::{
-    attributes::{AttributeCount, Attributes, Identity, UintEncoder},
+    attributes::{AttributeCount, Attributes, IdentityEncoder, UintEncoder},
     pederson::{PedersonCommitment, PedersonGenerators},
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover, SchnorrCS,
@@ -181,7 +183,7 @@ where
         proof: &SchnorrProof,
     ) -> Result<(), Error>
     where
-        Msg: Attributes<Identity<RistrettoScalar>>,
+        Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
         let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
         let mut verifier = Verifier::new(
@@ -313,7 +315,7 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
     ) -> (Presentation<CompressedRistretto, Msg>, SchnorrProof)
     where
         R: CryptoRngCore + ?Sized,
-        Msg: Attributes<Identity<RistrettoScalar>>,
+        Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
         // Randomize the RNG before presentation to ensure that the sent U value cannot be linked
         // to the one that was issued, or shown in any previous presentation of the same MAC.
