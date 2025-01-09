@@ -12,15 +12,13 @@ pub use attributes::{AttributeCount, AttributeLabels, Attributes, UintEncoder};
 #[cfg(feature = "derive")]
 pub use rkvc_derive::Attributes;
 
+pub mod cmz;
 pub mod hash;
 pub mod pederson;
+pub mod range;
 pub mod zkp;
 
-// TODO: Remove these
-pub mod range;
-
-pub mod cmz;
-
+/* TODO: None of these traits are used (yet)
 use rand_core::CryptoRng;
 
 pub trait Commitment {
@@ -53,6 +51,4 @@ pub trait Mac {
 /// A predicate, with respect to a Mac
 /// TODO
 pub trait Predicate {}
-
-#[cfg(test)]
-mod tests {}
+*/
