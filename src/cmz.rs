@@ -24,6 +24,8 @@ use crate::{
     },
 };
 
+// TODO: A weakness exists with the current design that needs to be mitigated with the addition of
+// an extra key element. I need to learn the specifics of this weakness and address this.
 #[derive(Clone)]
 pub struct Key<F, Msg>(F, GenericArray<F, Msg::N>)
 where
