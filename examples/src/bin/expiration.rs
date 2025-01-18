@@ -1,4 +1,5 @@
 use core::ops::Mul;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use blake2::Blake2b512;
@@ -11,7 +12,6 @@ use rkvc::{
     zkp::{Prover, Transcript, Verifier},
     Attributes, UintEncoder,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Attributes, Clone, Debug)]
 struct ExpirationAttributes {
