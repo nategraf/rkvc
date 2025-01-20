@@ -65,6 +65,23 @@ macro_rules! impl_encoder_range_proof_encoder {
 
 impl_encoder_range_proof_encoder!(u8, u16, u32, u64);
 
+impl<F: Field> Encoder<bool> for RangeProofEncoder<F> {
+    /// Encode true to 1 in the field, and false to 0.
+    #[inline]
+    fn encode_value(&mut self, value: bool) -> Self::Output {
+        let scalar = match value {
+            true => F::ONE,
+            false => F::ZERO,
+        };
+        (scalar, Some(1))
+    }
+
+    #[inline]
+    fn encode_type(&mut self) -> Self::TypeOutput {
+        Some(1)
+    }
+}
+
 impl<F: Field> Encoder<&F> for RangeProofEncoder<F> {
     fn encode_value(&mut self, value: &F) -> Self::Output {
         (*value, None)

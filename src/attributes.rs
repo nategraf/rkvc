@@ -199,6 +199,20 @@ macro_rules! impl_encoder_uint_encoder {
 
 impl_encoder_uint_encoder!(u8, u16, u32, u64, u128);
 
+impl<T> Encoder<bool> for UintEncoder<T>
+where
+    T: ff::Field,
+{
+    /// Encode true to 1 in the field, and false to 0.
+    #[inline]
+    fn encode_value(&mut self, value: bool) -> Self::Output {
+        match value {
+            true => T::ONE,
+            false => T::ZERO,
+        }
+    }
+}
+
 impl<T: Clone> Encoder<&T> for UintEncoder<T> {
     fn encode_value(&mut self, value: &T) -> Self::Output {
         value.clone()
