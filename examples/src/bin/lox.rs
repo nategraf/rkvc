@@ -18,7 +18,9 @@ use std::collections::HashSet;
 use blake2::Blake2b512;
 use curve25519_dalek::Scalar;
 use hkdf::SimpleHkdf as Hkdf;
+use rand::{CryptoRng, Rng};
 use rkvc::Attributes;
+use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 #[derive(Attributes, Clone, Debug)]
@@ -101,13 +103,8 @@ struct BucketReachabilityToken {
     bucket: BucketId,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct BridgeLine {}
-
-struct LoxAuthority {
-    /// Primary key used to derive bucket encryption keys (K_i).
-    bucket_encryption_key: Zeroizing<[u8; 16]>,
-    seen_credential_ids: HashSet<Scalar>,
-}
 
 /// An numerical index bucket identifier.
 ///
@@ -115,7 +112,7 @@ struct LoxAuthority {
 /// invite-only, if the bridges remain unblocked for the required number of days. All grouped
 /// open-entry buckets will have the same identifier expect for the least-significant byte, which
 /// is used as an index within the grouping.
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
 struct BucketId(pub u64);
 
 impl BucketId {
@@ -132,7 +129,30 @@ impl BucketId {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Bucket {
+    id: BucketId,
+    bridges: Vec<BridgeLine>,
+}
+
+struct LoxAuthority {
+    /// Primary key used to derive bucket encryption keys (K_i).
+    bucket_encryption_key: Zeroizing<[u8; 16]>,
+    seen_credential_ids: HashSet<Scalar>,
+}
+
 impl LoxAuthority {
+    fn new(mut rng: impl CryptoRng) -> Self {
+        Self {
+            bucket_encryption_key: Zeroizing::new(rng.random()),
+            seen_credential_ids: HashSet::new(),
+        }
+    }
+
+    fn encrypt_bucket(&self, _bucket: Bucket, _rng: impl CryptoRng) -> ! {
+        todo!()
+    }
+
     fn bucket_key(&self, id: BucketId) -> Zeroizing<[u8; 16]> {
         let mut key = Zeroizing::<[u8; 16]>::default();
         Hkdf::<Blake2b512>::new(
