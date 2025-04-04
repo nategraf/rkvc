@@ -623,7 +623,6 @@ dependencies = [
  "lox-zkp",
  "nimue",
  "rand 0.8.5",
- "rand_core 0.6.4",
  "rkvc",
  "rkvc-derive",
  "subtle",

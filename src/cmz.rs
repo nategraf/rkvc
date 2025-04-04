@@ -11,7 +11,7 @@ use curve25519_dalek::{
 use generic_array::GenericArray;
 use group::{Group, GroupEncoding};
 use itertools::zip_eq;
-use rand_core::CryptoRngCore;
+use rand::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
 use typenum::Unsigned;
 
@@ -76,14 +76,11 @@ impl<Msg> Key<RistrettoScalar, Msg>
 where
     Msg: AttributeCount,
 {
-    pub fn gen<R>(rng: &mut R) -> Self
-    where
-        R: CryptoRngCore + ?Sized,
-    {
+    pub fn gen(mut rng: impl CryptoRng + RngCore) -> Self {
         Self(
-            RistrettoScalar::random(rng),
+            RistrettoScalar::random(&mut rng),
             (0..Msg::N::USIZE)
-                .map(|_| RistrettoScalar::random(rng))
+                .map(|_| RistrettoScalar::random(&mut rng))
                 .collect(),
         )
     }
@@ -294,11 +291,8 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
     /// Randomize the MAC such that revealing the newly randomized U value cannot result in linkage
     /// to the original issued U value. This should be done when receiving the MAC, and before any
     /// presentation.
-    pub fn randomize<R>(&mut self, rng: &mut R) -> RistrettoScalar
-    where
-        R: CryptoRngCore + ?Sized,
-    {
-        let r = RistrettoScalar::random(rng);
+    pub fn randomize(&mut self, mut rng: impl CryptoRng + RngCore) -> RistrettoScalar {
+        let r = RistrettoScalar::random(&mut rng);
         self.u = self.u.mul(r);
         self.v = self.v.mul(r);
         r
@@ -309,19 +303,18 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
     /// about the underlying message.
     ///
     /// Internally randomizes the MAC before generating the presentation.
-    pub fn present<R>(
+    pub fn present(
         &mut self,
         msg: &Msg,
         pp: &PublicParameters<RistrettoPoint, Msg>,
-        rng: &mut R,
+        mut rng: impl CryptoRng + RngCore,
     ) -> (Presentation<CompressedRistretto, Msg>, SchnorrProof)
     where
-        R: CryptoRngCore + ?Sized,
         Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
         // Randomize the RNG before presentation to ensure that the sent U value cannot be linked
         // to the one that was issued, or shown in any previous presentation of the same MAC.
-        self.randomize(rng);
+        self.randomize(&mut rng);
 
         // Produce a ZKP attesting to the knowledge of an opening for the committed values.
         // NOTE: Unwrap will never panic, prove_presentation is infallible.
@@ -334,7 +327,7 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
             &mut prover,
             &msg.encode_attributes().collect(),
             pp,
-            rng,
+            &mut rng,
         );
         let proof = prover.prove_compact();
 
@@ -345,26 +338,25 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
     /// other statements being proven.
     ///
     /// Does not randomize the MAC; [Mac::randomize] should be called seperately.
-    pub fn prove_presentation_constraints<'a, R>(
+    pub fn prove_presentation_constraints<'a>(
         &self,
         prover: &mut Prover<'a>,
         msg_encoded: &GenericArray<RistrettoScalar, Msg::N>,
         pp: &PublicParameters<RistrettoPoint, Msg>,
-        rng: &mut R,
+        mut rng: impl RngCore + CryptoRng,
     ) -> (
         Presentation<CompressedRistretto, Msg>,
         GenericArray<<Prover<'a> as SchnorrCS>::ScalarVar, Msg::N>,
     )
     where
-        R: CryptoRngCore + ?Sized,
         Msg: AttributeCount,
     {
-        let r_v = RistrettoScalar::random(rng);
+        let r_v = RistrettoScalar::random(&mut rng);
         let commit_v_blind_point = PublicParameters::<RistrettoPoint, Msg>::h().mul(r_v);
         let commit_v = self.v + commit_v_blind_point;
 
         let r: GenericArray<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
-            .map(|_| RistrettoScalar::random(rng))
+            .map(|_| RistrettoScalar::random(&mut rng))
             .collect();
         let commit_msg = zip_eq(msg_encoded.as_slice(), r.as_slice())
             .map(|(m_i, r_i)| self.u.mul(m_i) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))

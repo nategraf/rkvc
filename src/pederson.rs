@@ -11,7 +11,7 @@ use curve25519_dalek::{
 use generic_array::{ArrayLength, GenericArray};
 use group::Group;
 use itertools::zip_eq;
-use rand_core::CryptoRngCore;
+use rand::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
 use typenum::U64;
 
@@ -89,16 +89,15 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
         }
     }
 
-    pub fn commit<Msg, R>(
+    pub fn commit<Msg>(
         &self,
         msg: &Msg,
-        rng: &mut R,
+        mut rng: impl RngCore + CryptoRng,
     ) -> (PedersonCommitment<RistrettoPoint, Msg>, RistrettoScalar)
     where
-        R: CryptoRngCore + ?Sized,
         Msg: Attributes<UintEncoder<RistrettoScalar>> + AttributeCount<N = N>,
     {
-        let blind = RistrettoScalar::random(rng);
+        let blind = RistrettoScalar::random(&mut rng);
         (self.commit_with_blind(msg, blind), blind)
     }
 
@@ -321,7 +320,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
 
     pub fn commit<R>(msg: &Msg, rng: &mut R) -> (Self, RistrettoScalar)
     where
-        R: CryptoRngCore + ?Sized,
+        R: RngCore + CryptoRng + ?Sized,
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
         PedersonGenerators::attributes_default::<Msg>().commit(msg, rng)

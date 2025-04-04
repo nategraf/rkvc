@@ -29,7 +29,6 @@ itertools = "0.14.0"
 lox-zkp = "=0.8.1"
 nimue = { version = "0.1.1", default-features = false, features = ["group"] }
 rand = { version = "0.8", default-features = false, features = ["std_rng"] }
-rand_core = { version = "0.6", default-features = false }
 rkvc-derive = { path = "./derive", optional = true }
 subtle = { version = "2.6", default-features = false }
 thiserror = { version = "2.0.11", default-features = false }

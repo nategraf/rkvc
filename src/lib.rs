@@ -18,9 +18,10 @@ pub mod pederson;
 pub mod range;
 pub mod zkp;
 
-/* TODO: None of these traits are used (yet)
-use rand_core::CryptoRng;
+/// rand module used by this crate, provided to ease version mismatch issues.
+pub use rand;
 
+/* TODO: None of these traits are used (yet)
 pub trait Commitment {
     type Attributes;
 }

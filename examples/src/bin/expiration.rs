@@ -55,7 +55,7 @@ impl Credential {
                 .attribute_walk(UintEncoder::default())
                 .collect(),
             pp,
-            &mut rand::thread_rng(),
+            rkvc::rand::thread_rng(),
         );
         let (mut bulletproof_commits, mut bulletproof_openings) =
             Bulletproof::prove_range_commit_constaints(
@@ -100,7 +100,7 @@ struct Issuer {
 impl Issuer {
     pub fn new() -> Self {
         Self {
-            key: Key::gen(&mut rand::thread_rng()),
+            key: Key::gen(rkvc::rand::thread_rng()),
         }
     }
 
