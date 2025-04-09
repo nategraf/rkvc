@@ -22,6 +22,7 @@ bulletproofs = { version = "5.0.0", default-features = false, features = ["rand"
 curve25519-dalek = { version = "4.1", default-features = false, features = ["zeroize", "precomputed-tables", "rand_core", "digest", "serde", "group"] }
 digest = { version = "0.10.7", default-features = false }
 ff = { version = "0.13.0", default-features = false, features = ["bits", "derive", "derive_bits"] }
+# TODO: Switch to hybrid-array
 generic-array = { version = "1.2.0", default-features = false, features = ["serde", "zeroize"] }
 group = { version = "0.13.0", default-features = false, features = ["rand"] }
 itertools = "0.14.0"

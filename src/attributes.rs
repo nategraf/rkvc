@@ -127,6 +127,7 @@ where
 pub trait EncoderOutput {
     type Output;
 
+    // TODO: Split this off into an EncoderTypeOutput trait.
     type TypeOutput;
 
     /// Encode the attribute values of the given message using a [Default] instance of this type.
