@@ -1,0 +1,23 @@
+error: proc-macro derive panicked
+ --> tests/expand/parse_errors.rs:3:10
+  |
+3 | #[derive(Attributes)]
+  |          ^^^^^^^^^^
+  |
+  = help: message: called `Result::unwrap()` on an `Err` value: Error("expected attribute arguments in parentheses: #[rkvc(...)]")
+
+error: proc-macro derive panicked
+ --> tests/expand/parse_errors.rs:9:10
+  |
+9 | #[derive(Attributes)]
+  |          ^^^^^^^^^^
+  |
+  = help: message: unknown attribute name: foo
+
+error: proc-macro derive panicked
+  --> tests/expand/parse_errors.rs:15:10
+   |
+15 | #[derive(Attributes)]
+   |          ^^^^^^^^^^
+   |
+   = help: message: called `Result::unwrap()` on an `Err` value: Error("expected string literal")

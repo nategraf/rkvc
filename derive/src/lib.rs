@@ -4,7 +4,9 @@ use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span};
 use proc_macro_crate::FoundCrate;
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, parse_quote, spanned::Spanned, Data, DeriveInput, Fields, Type};
+use syn::{
+    parse_macro_input, parse_quote, spanned::Spanned, Data, DeriveInput, Fields, LitStr, Type,
+};
 
 // TODO: Fill this in, copying from below.
 fn is_primitive_type(ty: &syn::TypePath) -> bool {
@@ -29,17 +31,47 @@ fn is_primitive_type(ty: &syn::TypePath) -> bool {
     }
 }
 
-#[proc_macro_derive(Attributes)]
+#[proc_macro_derive(Attributes, attributes(rkvc))]
 pub fn derive_attributes(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let struct_name = input.ident;
 
-    // Get the crate name - we'll use the current module path
-    let rkvc_path =
-        match proc_macro_crate::crate_name("rkvc").expect("rkvc must be a direct dependency") {
+    // Check for custom crate path in attributes
+    let mut custom_crate_path = None;
+
+    for attr in &input.attrs {
+        if !attr.path().is_ident("rkvc") {
+            continue;
+        }
+
+        attr.parse_nested_meta(|meta| {
+            let Some(attr_ident_string) = meta.path.get_ident().map(|i| i.to_string()) else {
+                panic!("non-ident attribute in list");
+            };
+
+            match attr_ident_string.as_str() {
+                "crate_path" => {
+                    let lit_str: LitStr = meta.value()?.parse()?;
+                    custom_crate_path = Some(Ident::new(&lit_str.value(), Span::call_site()));
+                }
+                _ => {
+                    panic!("unknown attribute name: {attr_ident_string}");
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    // Get the crate name - use custom path if provided, otherwise auto-detect
+    let rkvc_path = custom_crate_path.unwrap_or_else(|| {
+        match proc_macro_crate::crate_name("rkvc")
+            .expect("rkvc must be a direct dependency in Cargo.toml")
+        {
             FoundCrate::Itself => Ident::new("crate", Span::call_site()),
             FoundCrate::Name(name) => Ident::new(&name, Span::call_site()),
-        };
+        }
+    });
 
     let fields = match input.data {
         Data::Struct(data) => match data.fields {
