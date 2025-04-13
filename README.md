@@ -22,6 +22,8 @@ The project consists of several components:
 ### Prerequisites
 
 - Rust 1.85 or later
+- `cargo expand` is required for macro tests
+  - `cargo install --locked cargo-expand`
 
 ### Building
 
@@ -34,6 +36,16 @@ cargo build
 ```sh
 cargo test
 ```
+
+#### Updating macro tests
+
+When developing the macro implementation, test vectors can be updated with the following command.
+
+```
+TRYBUILD=overwrite MACROTEST=overwrite cargo test -p rkvc-derive
+```
+
+Examine the changes and check commit them with `git` if they are as expected.
 
 ### Development Commands
 

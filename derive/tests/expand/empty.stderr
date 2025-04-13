@@ -1,0 +1,7 @@
+error: proc-macro derive panicked
+ --> tests/expand/empty.rs:3:10
+  |
+3 | #[derive(Attributes)]
+  |          ^^^^^^^^^^
+  |
+  = help: message: not implemented: Not implemented for empty structs

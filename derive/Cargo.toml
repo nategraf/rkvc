@@ -12,3 +12,8 @@ proc-macro-crate = "3.2"
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "2.0", features = ["extra-traits"] }
+
+[dev-dependencies]
+macrotest = "1.1.0"
+rkvc = { workspace = true }
+trybuild = "1.0"

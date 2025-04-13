@@ -16,6 +16,10 @@ version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 
+[workspace.dependencies]
+rkvc = { path = "." }
+rkvc-derive = { path = "./derive" }
+
 [dependencies]
 blake2 = { version = "0.10.6", default-features = false }
 bulletproofs = { version = "5.0.0", default-features = false, features = ["rand", "thiserror"] }
@@ -37,8 +41,8 @@ typenum = { version = "1.17.0", features = ["const-generics", "no_std"] }
 zeroize = { version = "1.8.1", default-features = false }
 
 [dev-dependencies]
-rkvc = { path = ".", features = ["std"] }
-rkvc-derive = { path = "./derive" }
+rkvc = { workspace = true, features = ["std"] }
+rkvc-derive = { workspace = true }
 
 [profile.dev]
 # Makes tests run much faster at the cost of slightly longer builds.
