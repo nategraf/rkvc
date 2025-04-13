@@ -20,9 +20,9 @@ impl rkvc::AttributeLabels for BasicStruct {
 impl<E> rkvc::Attributes<E> for BasicStruct
 where
     E: rkvc::attributes::EncoderOutput,
-    E: rkvc::attributes::Encoder<u64>,
-    E: rkvc::attributes::Encoder<u32>,
     E: for<'a> rkvc::attributes::Encoder<&'a String>,
+    E: rkvc::attributes::Encoder<u32>,
+    E: rkvc::attributes::Encoder<u64>,
 {
     fn attribute_at(&self, i: usize, encoder: &mut E) -> Option<E::Output> {
         match i {

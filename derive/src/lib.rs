@@ -97,12 +97,19 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
     // Collect all the unique types found on fields in the struct, and render them into the type
     // bounds that will be applied to the encoder type on the Attributes implementation. Generate a
     // type bound on e.g. Encoder<u64> for primitive types Encoder<&T> for all other types.
-    let encoder_type_bounds: Vec<_> = std::iter::zip(
+    let encoder_type_bounds: Vec<_> = {
+        let mut bounds: Vec<_> = std::iter::zip(
             fields.iter().map(|f| f.ty.clone()),
-            attribute_types.iter().cloned()
+            attribute_types.iter().cloned(),
         )
         .collect::<HashSet<_>>()
         .into_iter()
+        .collect();
+
+        // Sort the type bounds to ensure deterministic code generation.
+        bounds.sort_by_key(|(ty, attr_ty)| format!("{ty:?} : {attr_ty:?}"));
+
+        bounds.into_iter()
         .map(|(ty, attr_ty)|
             match attr_ty {
                 Type::Path(_) => quote_spanned!(ty.span() => #rkvc_path::attributes::Encoder<#ty>),
@@ -110,7 +117,8 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
                 _ => unreachable!("macro implementation error: checks failed to ensure exhaustive handling of field types"),
             }
         )
-        .collect();
+        .collect()
+    };
 
     // TODO: Add a #[label = "foo"] attribute that can be used to specify the field label manually.
     let indices: Vec<usize> = (0..fields.len()).collect();

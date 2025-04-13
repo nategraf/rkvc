@@ -26,10 +26,10 @@ impl rkvc::AttributeLabels for ComplexTypes {
 impl<E> rkvc::Attributes<E> for ComplexTypes
 where
     E: rkvc::attributes::EncoderOutput,
-    E: for<'a> rkvc::attributes::Encoder<&'a HashMap<String, u64>>,
-    E: for<'a> rkvc::attributes::Encoder<&'a Vec<u32>>,
     E: for<'a> rkvc::attributes::Encoder<&'a CustomType>,
+    E: for<'a> rkvc::attributes::Encoder<&'a HashMap<String, u64>>,
     E: for<'a> rkvc::attributes::Encoder<&'a Option<u32>>,
+    E: for<'a> rkvc::attributes::Encoder<&'a Vec<u32>>,
 {
     fn attribute_at(&self, i: usize, encoder: &mut E) -> Option<E::Output> {
         match i {

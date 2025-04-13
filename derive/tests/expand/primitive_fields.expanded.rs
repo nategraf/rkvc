@@ -42,20 +42,20 @@ impl rkvc::AttributeLabels for Primitives {
 impl<E> rkvc::Attributes<E> for Primitives
 where
     E: rkvc::attributes::EncoderOutput,
-    E: rkvc::attributes::Encoder<isize>,
-    E: rkvc::attributes::Encoder<u32>,
-    E: rkvc::attributes::Encoder<u16>,
-    E: rkvc::attributes::Encoder<u128>,
-    E: rkvc::attributes::Encoder<i16>,
     E: rkvc::attributes::Encoder<bool>,
     E: rkvc::attributes::Encoder<char>,
-    E: rkvc::attributes::Encoder<u64>,
-    E: rkvc::attributes::Encoder<i8>,
-    E: rkvc::attributes::Encoder<u8>,
-    E: rkvc::attributes::Encoder<usize>,
+    E: rkvc::attributes::Encoder<i128>,
+    E: rkvc::attributes::Encoder<i16>,
     E: rkvc::attributes::Encoder<i32>,
     E: rkvc::attributes::Encoder<i64>,
-    E: rkvc::attributes::Encoder<i128>,
+    E: rkvc::attributes::Encoder<i8>,
+    E: rkvc::attributes::Encoder<isize>,
+    E: rkvc::attributes::Encoder<u128>,
+    E: rkvc::attributes::Encoder<u16>,
+    E: rkvc::attributes::Encoder<u32>,
+    E: rkvc::attributes::Encoder<u64>,
+    E: rkvc::attributes::Encoder<u8>,
+    E: rkvc::attributes::Encoder<usize>,
 {
     fn attribute_at(&self, i: usize, encoder: &mut E) -> Option<E::Output> {
         match i {
