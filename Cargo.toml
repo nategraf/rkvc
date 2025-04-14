@@ -40,7 +40,6 @@ typenum = { version = "1.17.0", features = ["const-generics", "no_std"] }
 zeroize = { version = "1.8.1", default-features = false }
 
 [dev-dependencies]
-rkvc = { workspace = true, features = ["std"] }
 rkvc-derive = { workspace = true }
 
 [profile.dev]

@@ -31,7 +31,7 @@
 //!     vec![Scalar::from(10u32), Scalar::from(11u64), Scalar::from(12u32)]
 //! );
 //! ```
-use core::{borrow::BorrowMut, convert::Infallible, marker::PhantomData};
+use core::{borrow::BorrowMut, convert::Infallible, marker::PhantomData, ops::Deref};
 
 use hybrid_array::{Array, ArraySize};
 use typenum::Unsigned;
@@ -253,13 +253,31 @@ impl<T: Clone> Encoder<&T> for IdentityEncoder<T> {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct AttributeArray<T, A: AttributeCount>(pub Array<T, A::N>);
+
+impl<T, A: AttributeCount> Deref for AttributeArray<T, A> {
+    type Target = Array<T, A::N>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T, A: AttributeCount> FromIterator<T> for AttributeArray<T, A> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use core::ops::Deref;
     use curve25519_dalek::Scalar;
 
-    use super::{AttributeLabels, Attributes, UintEncoder};
+    use super::{AttributeArray, AttributeLabels, Attributes, UintEncoder};
 
-    #[derive(Attributes)]
+    #[derive(Debug, Attributes)]
     struct Example {
         foo: u64,
         bar: u32,
@@ -273,11 +291,19 @@ mod test {
             bar: 7,
             baz: Scalar::from(8u64),
         };
-        for (label, x) in itertools::zip_eq(
+        let attrs: AttributeArray<(&str, Scalar), Example> = itertools::zip_eq(
             Example::label_iter(),
             example.attribute_walk(UintEncoder::default()),
-        ) {
-            println!("{label}: {x:?}");
-        }
+        )
+        .collect();
+
+        assert_eq!(
+            attrs.deref(),
+            &[
+                ("Example::foo", Scalar::from(5u32)),
+                ("Example::bar", Scalar::from(7u32)),
+                ("Example::baz", Scalar::from(8u32)),
+            ]
+        );
     }
 }
