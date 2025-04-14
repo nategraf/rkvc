@@ -123,9 +123,9 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
 
     // Collect all the types found on fields in the struct, as they will presented to the encoder.
     // Primitve types (i.e. uints, ints, bool, char) passed by value, others passed by reference.
-    let attribute_types_res: Result<Vec<_>, _> = fields
+    let attribute_types_res: syn::Result<Vec<_>> = fields
         .iter()
-        .map(|f| -> Result<Type, _> {
+        .map(|f| -> syn::Result<Type> {
             match f.ty {
                 Type::Path(ref p) => match is_primitive_type(p) {
                     true => Ok(f.ty.clone()),
@@ -134,18 +134,17 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
                         Ok(parse_quote!(&#ty))
                     }
                 },
-                _ => Err(
-                    quote_spanned!(f.ty.span() => compile_error!("Only type paths are supported")),
-                ),
+                _ => Err(syn::Error::new(
+                    f.ty.span(),
+                    "only type paths are supported",
+                )),
             }
         })
         .collect();
 
     let attribute_types = match attribute_types_res {
         Ok(a) => a,
-        Err(compile_err) => {
-            return compile_err.into();
-        }
+        Err(err) => return err.into_compile_error().into(),
     };
 
     // Construct the argument(s) to the encode methods. Take a refernce if
