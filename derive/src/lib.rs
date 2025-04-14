@@ -53,6 +53,7 @@ impl Parse for DeriveAttributesInput {
 
         let mut custom_crate_path = None;
 
+        // Parse macro attributes (e.g. #[rkvc(crate_path = "foo")]).
         for attr in &input.attrs {
             if !attr.path().is_ident("rkvc") {
                 continue;
@@ -67,7 +68,7 @@ impl Parse for DeriveAttributesInput {
                     custom_crate_path = Some(Ident::new(&lit_str.value(), meta.path.span()));
                     Ok(())
                 }
-                _ => Err(meta.error("unknown attribute name")),
+                _ => Err(meta.error("Unknown attribute name")),
             })?;
         }
 
@@ -88,21 +89,21 @@ impl Parse for DeriveAttributesInput {
                 _ => {
                     return Err(syn::Error::new(
                         data.fields.span(),
-                        "only named fields are supported",
+                        "Only named fields are supported",
                     ))
                 }
             },
             _ => {
                 return Err(syn::Error::new(
                     Span::call_site(),
-                    "only structs are supported",
+                    "Only structs are supported",
                 ))
             }
         };
         if fields.is_empty() {
             return Err(syn::Error::new(
                 Span::call_site(),
-                "empty structs are not supported",
+                "Empty structs are not supported",
             ));
         }
 
@@ -134,9 +135,10 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
                         Ok(parse_quote!(&#ty))
                     }
                 },
+                // TODO: Move this fallible step into the parse impl.
                 _ => Err(syn::Error::new(
                     f.ty.span(),
-                    "only type paths are supported",
+                    "Only type paths are supported",
                 )),
             }
         })

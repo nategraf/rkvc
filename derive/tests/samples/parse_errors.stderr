@@ -4,7 +4,7 @@ error: expected attribute arguments in parentheses: `rkvc(...)`
 4 | #[rkvc]
   |   ^^^^
 
-error: unknown attribute name
+error: Unknown attribute name
   --> tests/samples/parse_errors.rs:10:8
    |
 10 | #[rkvc(foo = "bar")]
