@@ -33,7 +33,7 @@
 //! ```
 use core::{borrow::BorrowMut, convert::Infallible, marker::PhantomData};
 
-use generic_array::ArrayLength;
+use hybrid_array::{Array, ArraySize};
 use typenum::Unsigned;
 
 #[cfg(feature = "derive")]
@@ -44,7 +44,7 @@ pub use typenum;
 
 /// Count of the fields in the implementing type's [Attributes] encoding.
 pub trait AttributeCount {
-    type N: ArrayLength;
+    type N: ArraySize;
 }
 
 /// Labels for each field in the implementing type's [Attributes] encoding.
