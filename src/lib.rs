@@ -10,7 +10,10 @@
 extern crate alloc;
 
 pub mod attributes;
-pub use attributes::{AttributeCount, AttributeLabels, Attributes, IdentityEncoder, UintEncoder};
+pub use attributes::{
+    AttributeCount, AttributeLabels, Attributes, Encoder, EncoderOutput, IdentityEncoder,
+    UintEncoder,
+};
 
 pub mod cmz;
 pub mod hash;

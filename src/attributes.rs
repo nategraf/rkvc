@@ -6,13 +6,13 @@
 //!
 //! When the `derive` feature is enabled,
 //!
-//! ```no_run
-//! # // TODO: Fix issue with derive macro and the `crate` reference
-//! # use rkvc_derive::Attributes;
-//! use rkvc::{Attributes, UintEncoder};
+//! ```
+//! use rkvc::{Attributes, UintEncoder, EncoderOutput};
 //! use curve25519_dalek::Scalar;
 //!
+//! // You can override the crate path used in the derived impls with the rkvc attribute
 //! #[derive(Attributes)]
+//! # #[rkvc(crate_path = "rkvc")]
 //! struct Example {
 //!     a: u32,
 //!     b: u64,
