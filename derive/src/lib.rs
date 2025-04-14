@@ -5,7 +5,12 @@ use proc_macro2::{Ident, Span};
 use proc_macro_crate::FoundCrate;
 use quote::{quote, quote_spanned};
 use syn::{
-    parse_macro_input, parse_quote, spanned::Spanned, Data, DeriveInput, Fields, LitStr, Type,
+    parse::{Parse, ParseStream},
+    parse_macro_input, parse_quote,
+    punctuated::Punctuated,
+    spanned::Spanned,
+    token::Comma,
+    Data, DeriveInput, Field, Fields, LitStr, Type,
 };
 
 // TODO: Fill this in, copying from below.
@@ -31,58 +36,77 @@ fn is_primitive_type(ty: &syn::TypePath) -> bool {
     }
 }
 
+struct DeriveAttributesInput {
+    /// Path to the rkvc crate (e.g. "rkvc" or "crate").
+    crate_path: Ident,
+    /// Identifier for the struct to which the derive macro is being applied.
+    ident: Ident,
+    /// List of fields on the parsed struct.
+    ///
+    /// Only named fields are currently supported.
+    fields: Punctuated<Field, Comma>,
+}
+
+impl Parse for DeriveAttributesInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let input = DeriveInput::parse(input)?;
+
+        let mut custom_crate_path = None;
+
+        for attr in &input.attrs {
+            if !attr.path().is_ident("rkvc") {
+                continue;
+            }
+
+            // Require that the attribute use the list notation (i.e. disallow "#[rkvc]").
+            attr.meta.require_list()?;
+
+            attr.parse_nested_meta(|meta| match meta {
+                meta if meta.path.is_ident("crate_path") => {
+                    let lit_str = meta.value()?.parse::<LitStr>()?;
+                    custom_crate_path = Some(Ident::new(&lit_str.value(), meta.path.span()));
+                    Ok(())
+                }
+                _ => Err(meta.error("unknown attribute name")),
+            })?;
+        }
+
+        // Set the crate path - use custom path if provided, otherwise auto-detect.
+        let crate_path = custom_crate_path.unwrap_or_else(|| {
+            match proc_macro_crate::crate_name("rkvc")
+                .expect("rkvc must be a direct dependency in Cargo.toml")
+            {
+                FoundCrate::Itself => Ident::new("crate", Span::call_site()),
+                FoundCrate::Name(name) => Ident::new(&name, Span::call_site()),
+            }
+        });
+
+        // Extract the list of named fields.
+        let fields = match input.data {
+            Data::Struct(data) => match data.fields {
+                Fields::Named(fields) => fields.named,
+                _ => unimplemented!("Only named fields are supported"),
+            },
+            _ => unimplemented!("Only structs are supported"),
+        };
+        if fields.is_empty() {
+            unimplemented!("Not implemented for empty structs");
+        }
+
+        Ok(DeriveAttributesInput {
+            crate_path,
+            fields,
+            ident: input.ident,
+        })
+    }
+}
+
 #[proc_macro_derive(Attributes, attributes(rkvc))]
 pub fn derive_attributes(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
+    let input = parse_macro_input!(input as DeriveAttributesInput);
+    let rkvc_path = input.crate_path;
+    let fields = input.fields;
     let struct_name = input.ident;
-
-    // Check for custom crate path in attributes
-    let mut custom_crate_path = None;
-
-    for attr in &input.attrs {
-        if !attr.path().is_ident("rkvc") {
-            continue;
-        }
-
-        attr.parse_nested_meta(|meta| {
-            let Some(attr_ident_string) = meta.path.get_ident().map(|i| i.to_string()) else {
-                panic!("non-ident attribute in list");
-            };
-
-            match attr_ident_string.as_str() {
-                "crate_path" => {
-                    let lit_str: LitStr = meta.value()?.parse()?;
-                    custom_crate_path = Some(Ident::new(&lit_str.value(), Span::call_site()));
-                }
-                _ => {
-                    panic!("unknown attribute name: {attr_ident_string}");
-                }
-            }
-            Ok(())
-        })
-        .unwrap();
-    }
-
-    // Get the crate name - use custom path if provided, otherwise auto-detect
-    let rkvc_path = custom_crate_path.unwrap_or_else(|| {
-        match proc_macro_crate::crate_name("rkvc")
-            .expect("rkvc must be a direct dependency in Cargo.toml")
-        {
-            FoundCrate::Itself => Ident::new("crate", Span::call_site()),
-            FoundCrate::Name(name) => Ident::new(&name, Span::call_site()),
-        }
-    });
-
-    let fields = match input.data {
-        Data::Struct(data) => match data.fields {
-            Fields::Named(fields) => fields.named,
-            _ => unimplemented!("Only named fields are supported"),
-        },
-        _ => unimplemented!("Only structs are supported"),
-    };
-    if fields.is_empty() {
-        unimplemented!("Not implemented for empty structs");
-    }
 
     // Collect all the types found on fields in the struct, as they will presented to the encoder.
     // Primitve types (i.e. uints, ints, bool, char) passed by value, others passed by reference.
