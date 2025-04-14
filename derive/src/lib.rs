@@ -147,7 +147,8 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         Err(err) => return err.into_compile_error().into(),
     };
 
-    // Construct the argument(s) to the encode methods. Take a refernce if
+    // Construct the argument(s) to the encode methods. Take a refernce if the field is a
+    // non-primitive type.
     let encode_value_args: Vec<_> = std::iter::zip(
         fields
         .iter(),
