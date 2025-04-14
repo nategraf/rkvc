@@ -34,7 +34,7 @@ cargo build
 ### Running Tests
 
 ```sh
-cargo test
+cargo test --workspace
 ```
 
 #### Updating macro tests
