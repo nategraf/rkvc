@@ -85,12 +85,25 @@ impl Parse for DeriveAttributesInput {
         let fields = match input.data {
             Data::Struct(data) => match data.fields {
                 Fields::Named(fields) => fields.named,
-                _ => unimplemented!("Only named fields are supported"),
+                _ => {
+                    return Err(syn::Error::new(
+                        data.fields.span(),
+                        "only named fields are supported",
+                    ))
+                }
             },
-            _ => unimplemented!("Only structs are supported"),
+            _ => {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    "only structs are supported",
+                ))
+            }
         };
         if fields.is_empty() {
-            unimplemented!("Not implemented for empty structs");
+            return Err(syn::Error::new(
+                Span::call_site(),
+                "empty structs are not supported",
+            ));
         }
 
         Ok(DeriveAttributesInput {

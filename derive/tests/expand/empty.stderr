@@ -1,7 +1,7 @@
-error: proc-macro derive panicked
+error: empty structs are not supported
  --> tests/expand/empty.rs:3:10
   |
 3 | #[derive(Attributes)]
   |          ^^^^^^^^^^
   |
-  = help: message: not implemented: Not implemented for empty structs
+  = note: this error originates in the derive macro `Attributes` (in Nightly builds, run with -Z macro-backtrace for more info)
