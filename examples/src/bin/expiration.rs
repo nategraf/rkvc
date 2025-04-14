@@ -68,22 +68,21 @@ impl Credential {
 
         // Subtract the current timestamp `at` from the commitmentted value. The result will only
         // be in the u64 range if it is greater than or equal to `at`.
-        // TODO: This relies on fragile implementation details. Provide a more robust way to
-        // accomplish this.
-        let expiration_commit: RistrettoPoint = bulletproof_commits[1].unwrap();
-        *bulletproof_commits[1].as_mut().unwrap() -=
+        let expiration_commit: RistrettoPoint = bulletproof_commits.expiration().unwrap();
+        *bulletproof_commits.expiration_mut().as_mut().unwrap() -=
             RISTRETTO_BASEPOINT_TABLE.mul(&Scalar::from(at));
-        let (expiration, expiration_blind) = bulletproof_openings[1].unwrap();
-        bulletproof_openings[1] = Some((expiration - Scalar::from(at), expiration_blind));
+        let (expiration, expiration_blind) = bulletproof_openings.expiration().unwrap();
+        *bulletproof_openings.expiration_mut() =
+            Some((expiration - Scalar::from(at), expiration_blind));
 
         let mut bulletproof = Bulletproof::prove_bulletproof(
             &mut transcript,
-            bulletproof_commits,
-            bulletproof_openings,
+            &bulletproof_commits,
+            &bulletproof_openings,
         )?;
 
         // Reset the value in the commit, which will be used for the DLEQ check with CMZ commit.
-        bulletproof.bulletproof_commits[1] = Some(expiration_commit.compress());
+        *bulletproof.bulletproof_commits.expiration_mut() = Some(expiration_commit.compress());
 
         Ok(CredentialPresentation {
             presentation,
@@ -133,15 +132,15 @@ impl Issuer {
 
         // Subtract the current timestamp `at` from the commitmentted value. The result will only
         // be in the u64 range if it is greater than or equal to `at`.
-        // TODO: This relies on fragile implementation details. Provide a more robust way to
-        // accomplish this.
         let mut bulletproof = pres.bulletproof.clone();
-        let mut expiration_commit = bulletproof.bulletproof_commits[1]
+        let mut expiration_commit = bulletproof
+            .bulletproof_commits
+            .expiration()
             .unwrap()
             .decompress()
             .ok_or(anyhow!("failed to decompress expiration commit"))?;
         expiration_commit -= RISTRETTO_BASEPOINT_TABLE.mul(&Scalar::from(at));
-        bulletproof.bulletproof_commits[1] = Some(expiration_commit.compress());
+        *bulletproof.bulletproof_commits.expiration_mut() = Some(expiration_commit.compress());
 
         bulletproof.verify_range_proof(&mut transcript)?;
         Ok(())

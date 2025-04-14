@@ -14,7 +14,7 @@ use itertools::zip_eq;
 use typenum::{Double, Unsigned};
 
 use crate::{
-    attributes::{AttributeCount, Attributes, Encoder, EncoderOutput},
+    attributes::{AttributeArray, AttributeCount, Attributes, Encoder, EncoderOutput},
     pederson::PedersonCommitment,
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, ProofError,
@@ -102,7 +102,7 @@ pub struct Bulletproof<Msg: AttributeCount> {
     ///
     /// Attributes of the native field type do not need a range check commitment, and so the
     /// respective index in this array will be populated with `None`.
-    pub bulletproof_commits: Array<Option<CompressedRistretto>, Msg::N>,
+    pub bulletproof_commits: AttributeArray<Option<CompressedRistretto>, Msg>,
     _phantom_msg: PhantomData<Msg>,
 }
 
@@ -187,7 +187,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         // NOTE: Uses rand::thread_rng internally, in conmbination with witness data.
         let schnorr_proof = prover.prove_compact();
         let bulletproof =
-            Self::prove_bulletproof(&mut transcript, bulletproof_commits, bulletproof_openings)?;
+            Self::prove_bulletproof(&mut transcript, &bulletproof_commits, &bulletproof_openings)?;
 
         Ok((bulletproof, schnorr_proof))
     }
@@ -199,8 +199,8 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         msg: &Msg,
     ) -> Result<
         (
-            Array<Option<RistrettoPoint>, Msg::N>,
-            Array<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N>,
+            AttributeArray<Option<RistrettoPoint>, Msg>,
+            AttributeArray<Option<(RistrettoScalar, RistrettoScalar)>, Msg>,
         ),
         ProveError,
     >
@@ -243,7 +243,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
 
         // Commit to each value that we will be proving the range check over.
         // TODO: Use bits here to prove the subrange constraint.
-        let openings: Array<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N> = msg
+        let openings: AttributeArray<Option<(RistrettoScalar, RistrettoScalar)>, Msg> = msg
             .encode_attributes()
             .map(|(x, bits)| {
                 bits.map(|_bits| {
@@ -252,7 +252,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
                 })
             })
             .collect();
-        let commits: Array<Option<RistrettoPoint>, Msg::N> = openings
+        let commits: AttributeArray<Option<RistrettoPoint>, Msg> = openings
             .iter()
             .map(|opening| opening.map(|(x, blind)| bulletproof_commit_gens.commit(x, blind)))
             .collect();
@@ -281,15 +281,15 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
 
     pub fn prove_bulletproof(
         transcript: &mut Transcript,
-        commits: Array<Option<RistrettoPoint>, Msg::N>,
-        openings: Array<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N>,
+        commits: &Array<Option<RistrettoPoint>, Msg::N>,
+        openings: &Array<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N>,
     ) -> Result<Self, ProveError>
     where
         Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
         Msg::N: Shl<typenum::B1>,
         Double<Msg::N>: ArraySize,
     {
-        let commits_compressed: Array<Option<CompressedRistretto>, Msg::N> =
+        let commits_compressed: AttributeArray<Option<CompressedRistretto>, Msg> =
             commits.iter().map(|c| c.map(|c| c.compress())).collect();
 
         // Count the number of checks that we expect to apply. This is used to determine how much

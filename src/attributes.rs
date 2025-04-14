@@ -31,7 +31,13 @@
 //!     vec![Scalar::from(10u32), Scalar::from(11u64), Scalar::from(12u32)]
 //! );
 //! ```
-use core::{borrow::BorrowMut, convert::Infallible, marker::PhantomData, ops::Deref};
+use core::{
+    borrow::BorrowMut,
+    convert::Infallible,
+    fmt::Debug,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 use hybrid_array::{Array, ArraySize};
 use typenum::Unsigned;
@@ -44,7 +50,7 @@ pub use typenum;
 
 /// Count of the fields in the implementing type's [Attributes] encoding.
 pub trait AttributeCount {
-    type N: ArraySize;
+    type N: ArraySize + Debug;
 }
 
 /// Labels for each field in the implementing type's [Attributes] encoding.
@@ -261,6 +267,12 @@ impl<T, A: AttributeCount> Deref for AttributeArray<T, A> {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl<T, A: AttributeCount> DerefMut for AttributeArray<T, A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
