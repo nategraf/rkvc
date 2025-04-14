@@ -23,12 +23,11 @@ rkvc-derive = { path = "./derive" }
 [dependencies]
 blake2 = { version = "0.10.6", default-features = false }
 bulletproofs = { version = "5.0.0", default-features = false, features = ["rand", "thiserror"] }
-curve25519-dalek = { version = "4.1", default-features = false, features = ["zeroize", "precomputed-tables", "rand_core", "digest", "serde", "group"] }
+curve25519-dalek = { version = "4.1", default-features = false, features = ["zeroize", "precomputed-tables", "rand_core", "digest", "group"] }
 digest = { version = "0.10.7", default-features = false }
 ff = { version = "0.13.0", default-features = false, features = ["bits", "derive", "derive_bits"] }
-# TODO: Switch to hybrid-array
-generic-array = { version = "1.2.0", default-features = false, features = ["serde", "zeroize"] }
 group = { version = "0.13.0", default-features = false, features = ["rand"] }
+hybrid-array = { version = "0.3.0", features = ["zeroize"] }
 itertools = "0.14.0"
 # lox-zkp is a fork of zkp, used by the Lox project, with some improvements
 lox-zkp = "=0.8.1"

@@ -8,7 +8,7 @@ use curve25519_dalek::{
     ristretto::{CompressedRistretto, RistrettoPoint},
     scalar::Scalar as RistrettoScalar,
 };
-use generic_array::{ArrayLength, GenericArray};
+use hybrid_array::{Array, ArraySize};
 use group::Group;
 use itertools::zip_eq;
 use rand::{CryptoRng, RngCore};
@@ -28,7 +28,7 @@ pub struct PedersonCommitment<G, Msg> {
 }
 
 #[derive(Clone, Debug)]
-pub struct PedersonGenerators<G, N: ArrayLength>(pub G, pub GenericArray<G, N>);
+pub struct PedersonGenerators<G, N: ArraySize>(pub G, pub Array<G, N>);
 
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
@@ -37,14 +37,14 @@ pub enum PedersonError {
     VerificationError,
 }
 
-impl<G: Group + FromHash<OutputSize = U64>, N: ArrayLength> PedersonGenerators<G, N> {
+impl<G: Group + FromHash<OutputSize = U64>, N: ArraySize> PedersonGenerators<G, N> {
     /// Manually construct a set of Pederson commitment generators.
     ///
     /// Discrete log relationship between the generators must be unknown to the part producing a
     /// commitment using these generators. If the discreet log is know to the committer, they may
     /// be able to break the binding property of the commitment and produce two messages than can
     /// be opened from the same commitment.
-    pub fn new(blind_gen: G, attributes_gen: GenericArray<G, N>) -> Self {
+    pub fn new(blind_gen: G, attributes_gen: Array<G, N>) -> Self {
         Self(blind_gen, attributes_gen)
     }
 
@@ -64,7 +64,7 @@ impl<G: Group + FromHash<OutputSize = U64>, N: ArrayLength> PedersonGenerators<G
     }
 }
 
-impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
+impl<N: ArraySize> PedersonGenerators<RistrettoPoint, N> {
     pub fn commit_with_blind<Msg>(
         &self,
         msg: &Msg,
@@ -184,7 +184,7 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
         &self,
         prover: &mut Prover,
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
-        msg_vars: &GenericArray<X, Msg::N>,
+        msg_vars: &Array<X, Msg::N>,
         blind: RistrettoScalar,
     ) where
         Msg: AttributeLabels,
@@ -233,7 +233,7 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
         &self,
         verifier: &mut Verifier,
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
-        msg_vars: &GenericArray<X, Msg::N>,
+        msg_vars: &Array<X, Msg::N>,
     ) -> Result<(), ProofError>
     where
         Msg: AttributeLabels,
@@ -257,7 +257,7 @@ impl<N: ArrayLength> PedersonGenerators<RistrettoPoint, N> {
     }
 }
 
-impl<N: ArrayLength> PedersonGenerators<CompressedRistretto, N> {
+impl<N: ArraySize> PedersonGenerators<CompressedRistretto, N> {
     /// Add constraints for knowledge of an opening for the given commitment to a [Verifier].
     ///
     /// Note that if the message contains fields that are not in the constraint system's native
@@ -269,7 +269,7 @@ impl<N: ArrayLength> PedersonGenerators<CompressedRistretto, N> {
         &self,
         verifier: &mut Verifier,
         commit: &PedersonCommitment<CompressedRistretto, Msg>,
-        msg_vars: &GenericArray<X, Msg::N>,
+        msg_vars: &Array<X, Msg::N>,
     ) -> Result<(), ProofError>
     where
         Msg: AttributeLabels,
@@ -305,7 +305,7 @@ impl<N: ArrayLength> PedersonGenerators<CompressedRistretto, N> {
             self.1
                 .iter()
                 .map(|g| g.decompress())
-                .collect::<Option<GenericArray<_, _>>>()?,
+                .collect::<Option<Array<_, _>>>()?,
         ))
     }
 }
@@ -371,7 +371,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     pub fn prove_opening_constraints<X>(
         &self,
         prover: &mut Prover,
-        msg_vars: &GenericArray<X, Msg::N>,
+        msg_vars: &Array<X, Msg::N>,
         blind: RistrettoScalar,
     ) where
         Msg: AttributeLabels,
@@ -393,7 +393,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     pub fn constrain_opening<X>(
         &self,
         verifier: &mut Verifier,
-        msg_vars: &GenericArray<X, Msg::N>,
+        msg_vars: &Array<X, Msg::N>,
     ) -> Result<(), ProofError>
     where
         Msg: AttributeLabels,
@@ -424,7 +424,7 @@ impl<Msg> PedersonCommitment<CompressedRistretto, Msg> {
     pub fn constrain_opening<X>(
         &self,
         verifier: &mut Verifier,
-        msg_vars: &GenericArray<X, Msg::N>,
+        msg_vars: &Array<X, Msg::N>,
     ) -> Result<(), ProofError>
     where
         Msg: AttributeLabels,

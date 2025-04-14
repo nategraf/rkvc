@@ -8,7 +8,7 @@ use curve25519_dalek::{
     ristretto::CompressedRistretto,
     RistrettoPoint, Scalar as RistrettoScalar,
 };
-use generic_array::GenericArray;
+use hybrid_array::Array;
 use group::{Group, GroupEncoding};
 use itertools::zip_eq;
 use rand::{CryptoRng, RngCore};
@@ -27,13 +27,13 @@ use crate::{
 // TODO: A weakness exists with the current design that needs to be mitigated with the addition of
 // an extra key element. I need to learn the specifics of this weakness and address this.
 #[derive(Clone)]
-pub struct Key<F, Msg>(F, GenericArray<F, Msg::N>)
+pub struct Key<F, Msg>(F, Array<F, Msg::N>)
 where
     Msg: AttributeCount;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct PublicParameters<G, Msg>(G, GenericArray<G, Msg::N>)
+pub struct PublicParameters<G, Msg>(G, Array<G, Msg::N>)
 where
     Msg: AttributeCount;
 
@@ -51,7 +51,7 @@ where
 {
     pub u: G,
     pub commit_v: G,
-    pub commit_msg: GenericArray<G, Msg::N>,
+    pub commit_msg: Array<G, Msg::N>,
 }
 
 #[non_exhaustive]
@@ -200,7 +200,7 @@ where
         &self,
         verifier: &mut Verifier<'a>,
         pres: &Presentation<CompressedRistretto, Msg>,
-    ) -> Result<GenericArray<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg::N>, Error> {
+    ) -> Result<Array<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg::N>, Error> {
         let u = pres.u.decompress().ok_or(Error::DecompressFailed)?;
         // NOTE: Unwrapping the CtChoice is ok here because U is non-private.
         if u.is_identity().into() {
@@ -216,7 +216,7 @@ where
                         .ok_or(Error::DecompressFailed)
                         .map(|c_i| c_i.mul(x_i))
                 })
-                .collect::<Result<GenericArray<_, Msg::N>, _>>()?
+                .collect::<Result<Array<_, Msg::N>, _>>()?
                 .into_iter()
                 .sum::<RistrettoPoint>();
 
@@ -276,7 +276,7 @@ where
             self.1
                 .iter()
                 .map(|pp_i| pp_i.decompress())
-                .collect::<Option<GenericArray<_, _>>>()?,
+                .collect::<Option<Array<_, _>>>()?,
         ))
     }
 }
@@ -341,12 +341,12 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
     pub fn prove_presentation_constraints<'a>(
         &self,
         prover: &mut Prover<'a>,
-        msg_encoded: &GenericArray<RistrettoScalar, Msg::N>,
+        msg_encoded: &Array<RistrettoScalar, Msg::N>,
         pp: &PublicParameters<RistrettoPoint, Msg>,
         mut rng: impl RngCore + CryptoRng,
     ) -> (
         Presentation<CompressedRistretto, Msg>,
-        GenericArray<<Prover<'a> as SchnorrCS>::ScalarVar, Msg::N>,
+        Array<<Prover<'a> as SchnorrCS>::ScalarVar, Msg::N>,
     )
     where
         Msg: AttributeCount,
@@ -355,12 +355,12 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
         let commit_v_blind_point = PublicParameters::<RistrettoPoint, Msg>::h().mul(r_v);
         let commit_v = self.v + commit_v_blind_point;
 
-        let r: GenericArray<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
+        let r: Array<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
             .map(|_| RistrettoScalar::random(&mut rng))
             .collect();
         let commit_msg = zip_eq(msg_encoded.as_slice(), r.as_slice())
             .map(|(m_i, r_i)| self.u.mul(m_i) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))
-            .collect::<GenericArray<RistrettoPoint, Msg::N>>();
+            .collect::<Array<RistrettoPoint, Msg::N>>();
         let z = zip_eq(r.as_slice(), pp.1.as_slice())
             .map(|(r_i, pp_i)| pp_i.mul(r_i))
             .sum::<RistrettoPoint>()
@@ -398,8 +398,8 @@ fn constrain_presentation<'a, Msg: AttributeCount>(
     u: CompressedRistretto,
     z: RistrettoPoint,
     pp: &PublicParameters<CompressedRistretto, Msg>,
-    commit_msg: &GenericArray<CompressedRistretto, Msg::N>,
-) -> Result<GenericArray<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg::N>, crate::zkp::ProofError> {
+    commit_msg: &Array<CompressedRistretto, Msg::N>,
+) -> Result<Array<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg::N>, crate::zkp::ProofError> {
     // A small macro to construct the labels for variables that get added to the transcript.
     macro_rules! label {
         ($s:literal) => {
@@ -409,7 +409,7 @@ fn constrain_presentation<'a, Msg: AttributeCount>(
     // Allocate variables used in multiple constraint declarations.
     let g_var = verifier.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
     let u_var = verifier.alloc_point((label!("u"), u))?;
-    let r_vars: GenericArray<_, Msg::N> =
+    let r_vars: Array<_, Msg::N> =
         verifier.alloc_scalars((0..Msg::N::USIZE).map(|_| label!("r_i")))?;
 
     // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
@@ -430,7 +430,7 @@ fn constrain_presentation<'a, Msg: AttributeCount>(
     constraint_z.eq(verifier, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
-    let m_vars: GenericArray<_, Msg::N> =
+    let m_vars: Array<_, Msg::N> =
         verifier.alloc_scalars((0..Msg::N::USIZE).map(|_| label!("m_i")))?;
     for (r_i_var, (m_var, c_i)) in zip_eq(
         r_vars.as_slice(),
@@ -452,11 +452,11 @@ fn prove_presentation_constraints<'a, Msg>(
     u: RistrettoPoint,
     r_v: RistrettoScalar,
     z: RistrettoPoint,
-    r: &GenericArray<RistrettoScalar, Msg::N>,
-    msg: &GenericArray<RistrettoScalar, Msg::N>,
+    r: &Array<RistrettoScalar, Msg::N>,
+    msg: &Array<RistrettoScalar, Msg::N>,
     pp: &PublicParameters<RistrettoPoint, Msg>,
-    commit_msg: &GenericArray<RistrettoPoint, Msg::N>,
-) -> Result<GenericArray<<Prover<'a> as SchnorrCS>::ScalarVar, Msg::N>, Infallible>
+    commit_msg: &Array<RistrettoPoint, Msg::N>,
+) -> Result<Array<<Prover<'a> as SchnorrCS>::ScalarVar, Msg::N>, Infallible>
 where
     Msg: AttributeCount,
 {
@@ -470,7 +470,7 @@ where
     // Allocate variables used in multiple constraint declarations.
     let g_var = prover.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
     let u_var = prover.alloc_point((label!("u"), u))?;
-    let r_vars: GenericArray<_, Msg::N> =
+    let r_vars: Array<_, Msg::N> =
         prover.alloc_scalars(r.iter().map(|r_i| (label!("r_i"), *r_i)))?;
 
     // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
@@ -488,7 +488,7 @@ where
     constraint_z.eq(prover, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
-    let m_vars: GenericArray<_, Msg::N> =
+    let m_vars: Array<_, Msg::N> =
         prover.alloc_scalars(msg.iter().map(|m_i| (label!("m_i"), *m_i)))?;
     let iter = zip_eq(
         zip_eq(m_vars.as_slice(), r_vars.as_slice()),

@@ -9,7 +9,7 @@ use curve25519_dalek::{
     Scalar as RistrettoScalar,
 };
 use ff::Field;
-use generic_array::{ArrayLength, GenericArray};
+use hybrid_array::{Array, ArraySize};
 use itertools::zip_eq;
 use typenum::{Double, Unsigned};
 
@@ -102,7 +102,7 @@ pub struct Bulletproof<Msg: AttributeCount> {
     ///
     /// Attributes of the native field type do not need a range check commitment, and so the
     /// respective index in this array will be populated with `None`.
-    pub bulletproof_commits: GenericArray<Option<CompressedRistretto>, Msg::N>,
+    pub bulletproof_commits: Array<Option<CompressedRistretto>, Msg::N>,
     _phantom_msg: PhantomData<Msg>,
 }
 
@@ -165,7 +165,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     where
         Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
         Msg::N: Shl<typenum::B1>,
-        Double<Msg::N>: ArrayLength,
+        Double<Msg::N>: ArraySize,
     {
         let mut transcript = Transcript::new(b"rkvc::range::PoK::transcript");
         let mut prover = Prover::new(b"rkvc::range::PoK::constraints", &mut transcript);
@@ -174,7 +174,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         // NOTE: Order of variable allocation effects the transcript.
         // Encode the message as scalars, ignoring the number of bits for the purpose of opening
         // the commitment (it is proven with a range proof below).
-        let attribute_vars: GenericArray<_, Msg::N> = prover
+        let attribute_vars: Array<_, Msg::N> = prover
             .alloc_scalars(
                 msg.encode_attributes_labeled()
                     .map(|(label, (m, _))| (label, m)),
@@ -195,12 +195,12 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     #[allow(clippy::type_complexity)] // TODO: address this warning
     pub fn prove_range_commit_constaints<X>(
         prover: &mut Prover,
-        attribute_vars: &GenericArray<X, Msg::N>,
+        attribute_vars: &Array<X, Msg::N>,
         msg: &Msg,
     ) -> Result<
         (
-            GenericArray<Option<RistrettoPoint>, Msg::N>,
-            GenericArray<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N>,
+            Array<Option<RistrettoPoint>, Msg::N>,
+            Array<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N>,
         ),
         ProveError,
     >
@@ -243,7 +243,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
 
         // Commit to each value that we will be proving the range check over.
         // TODO: Use bits here to prove the subrange constraint.
-        let openings: GenericArray<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N> = msg
+        let openings: Array<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N> = msg
             .encode_attributes()
             .map(|(x, bits)| {
                 bits.map(|_bits| {
@@ -252,7 +252,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
                 })
             })
             .collect();
-        let commits: GenericArray<Option<RistrettoPoint>, Msg::N> = openings
+        let commits: Array<Option<RistrettoPoint>, Msg::N> = openings
             .iter()
             .map(|opening| opening.map(|(x, blind)| bulletproof_commit_gens.commit(x, blind)))
             .collect();
@@ -281,15 +281,15 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
 
     pub fn prove_bulletproof(
         transcript: &mut Transcript,
-        commits: GenericArray<Option<RistrettoPoint>, Msg::N>,
-        openings: GenericArray<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N>,
+        commits: Array<Option<RistrettoPoint>, Msg::N>,
+        openings: Array<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N>,
     ) -> Result<Self, ProveError>
     where
         Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
         Msg::N: Shl<typenum::B1>,
-        Double<Msg::N>: ArrayLength,
+        Double<Msg::N>: ArraySize,
     {
-        let commits_compressed: GenericArray<Option<CompressedRistretto>, Msg::N> =
+        let commits_compressed: Array<Option<CompressedRistretto>, Msg::N> =
             commits.iter().map(|c| c.map(|c| c.compress())).collect();
 
         // Count the number of checks that we expect to apply. This is used to determine how much
@@ -318,7 +318,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
 
         // Coerce the attribute scalars into u64s. This should always succeed unless there is
         // an implementation error, and pad up to the nearest power of two.
-        let x_values_u64: GenericArray<u64, Double<Msg::N>> = openings
+        let x_values_u64: Array<u64, Double<Msg::N>> = openings
             .iter()
             .filter_map(|opening| *opening)
             .map(|(x, _)| {
@@ -331,7 +331,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
             .collect();
 
         // Collect the blinds, with padding, as we did for commits and values.
-        let bulletproof_blinds: GenericArray<RistrettoScalar, Double<Msg::N>> = openings
+        let bulletproof_blinds: Array<RistrettoScalar, Double<Msg::N>> = openings
             .iter()
             .filter_map(|opening| opening.map(|(_, blind)| blind))
             .chain((0..).map(|_| RistrettoScalar::ZERO))
@@ -366,7 +366,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     where
         Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
         Msg::N: Shl<typenum::B1>,
-        Double<Msg::N>: ArrayLength,
+        Double<Msg::N>: ArraySize,
     {
         let mut transcript = Transcript::new(b"rkvc::range::PoK::transcript");
         let mut verifier = Verifier::new(b"rkvc::range::PoK::constraints", &mut transcript);
@@ -375,7 +375,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         // NOTE: Order of variable allocation effects the transcript.
         // Encode the message, ignoring the number of bits for the purpose of opening the
         // commitment (it is verified with a range proof check in constrain_attribute_ranges).
-        let attribute_vars: GenericArray<_, Msg::N> = verifier.alloc_scalars(Msg::label_iter())?;
+        let attribute_vars: Array<_, Msg::N> = verifier.alloc_scalars(Msg::label_iter())?;
         commit.constrain_opening(&mut verifier, &attribute_vars)?;
         self.constrain_range_commit_opening(&mut verifier, &attribute_vars)?;
 
@@ -396,7 +396,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     pub fn constrain_range_commit_opening<X>(
         &self,
         verifier: &mut Verifier,
-        attribute_vars: &GenericArray<X, Msg::N>,
+        attribute_vars: &Array<X, Msg::N>,
     ) -> Result<(), VerifyError>
     where
         // TODO: Consider loosening this bound. Other "constrain" functions do not require a
@@ -465,7 +465,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     where
         Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
         Msg::N: Shl<typenum::B1>,
-        Double<Msg::N>: ArrayLength,
+        Double<Msg::N>: ArraySize,
     {
         // Determine the largest attribute type we need to range check. We will use that for our
         // batched range check and further constrain any smaller items into a subrange.
@@ -482,7 +482,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
 
         // Collect the commitment into a slice of type [CompressedRistretto] for use with the
         // bulletproofs. We also need to pad up to the nearest power of two.
-        let bulletproof_commits: GenericArray<CompressedRistretto, Double<Msg::N>> = zip_eq(
+        let bulletproof_commits: Array<CompressedRistretto, Double<Msg::N>> = zip_eq(
             Msg::encode_attribute_types(),
             self.bulletproof_commits.as_slice(),
         )
