@@ -1,17 +1,17 @@
 error: expected attribute arguments in parentheses: `rkvc(...)`
- --> tests/expand/parse_errors.rs:4:3
+ --> tests/samples/parse_errors.rs:4:3
   |
 4 | #[rkvc]
   |   ^^^^
 
 error: unknown attribute name
-  --> tests/expand/parse_errors.rs:10:8
+  --> tests/samples/parse_errors.rs:10:8
    |
 10 | #[rkvc(foo = "bar")]
    |        ^^^
 
 error: expected string literal
-  --> tests/expand/parse_errors.rs:16:21
+  --> tests/samples/parse_errors.rs:16:21
    |
 16 | #[rkvc(crate_path = rkvc)]
    |                     ^^^^

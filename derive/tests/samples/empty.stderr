@@ -1,5 +1,5 @@
 error: empty structs are not supported
- --> tests/expand/empty.rs:3:10
+ --> tests/samples/empty.rs:3:10
   |
 3 | #[derive(Attributes)]
   |          ^^^^^^^^^^

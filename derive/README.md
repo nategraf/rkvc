@@ -17,7 +17,7 @@ struct MyAttributes {
 
 More examples can be found, with realistic use cases, in the [`examples` directory of `rkvc`](../examples/).
 
-You can also see what various test cases exapnd to by looking at the `macrotest` files in the [`tests/expand` directory](./tests/expand/).
+You can also see what various test cases exapnd to by looking at the `macrotest` files in the [`tests/samples` directory](./tests/samples/).
 
 ## Test
 
@@ -27,7 +27,7 @@ Tests are defined using `macrotest` and `trybuild`, testing what the macro expan
 cargo test
 ```
 
-Output is compared to `*.expanded.rs` and `.stderr` files stored alongside the tests in [`tests/expand`](./tests/expand).
+Output is compared to `*.expanded.rs` and `.stderr` files stored alongside the tests in [`tests/samples`](./tests/samples).
 When making an intentional change, the following command can be used to update the test files.
 
 ```sh
