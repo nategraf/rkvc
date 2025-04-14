@@ -1,16 +1,16 @@
 use std::collections::HashSet;
 
 use proc_macro::TokenStream;
-use proc_macro2::{Ident, Span};
+use proc_macro2::Span;
 use proc_macro_crate::FoundCrate;
-use quote::{quote, quote_spanned};
+use quote::{format_ident, quote, quote_spanned};
 use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input, parse_quote,
     punctuated::Punctuated,
     spanned::Spanned,
     token::Comma,
-    Data, DeriveInput, Field, Fields, LitStr, Type,
+    Data, DeriveInput, Field, Fields, Ident, LitStr, Type,
 };
 
 // TODO: Fill this in, copying from below.
@@ -192,16 +192,45 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
     };
 
     // TODO: Add a #[label = "foo"] attribute that can be used to specify the field label manually.
+    // TODO: Support numerical index assignment other than sequential and adjust accordingly.
     let indices: Vec<usize> = (0..fields.len()).collect();
-    let field_labels: Vec<_> = fields
+    let field_labels: Vec<String> = fields
         .iter()
         .map(|f| f.ident.as_ref().unwrap())
         .map(|name| format!("{}::{}", struct_name, name))
         .collect();
 
-    let attribute_count = fields.len();
+    // Collect the information needed to build the Index trait.
+    // TODO: How should this deal with non-pub fields?
+    let index_trait_name: Ident = format_ident!("{struct_name}Index");
+    let field_idents: Vec<Ident> = fields
+        .iter()
+        .map(|f| {
+            f.ident
+                .clone()
+                .expect("macro implementation error: failed to get ident for field")
+        })
+        .collect();
 
+    let index_fn_docs: Vec<String> = field_idents.iter().map(|field_ident| {
+        format!("Index into the container to access the element associated with [{struct_name}::{field_ident}]")
+    }).collect();
+
+    // TODO: This breaks if the struct is generic.
+    let attribute_count = fields.len();
     quote! {
+        trait #index_trait_name {
+            type Value;
+
+            #(#[doc = #index_fn_docs] fn #field_idents(&self) -> &Self::Value;)*
+        }
+
+        impl<T> #index_trait_name for #rkvc_path::AttributeArray<T, #struct_name> {
+            type Value = T;
+
+            #(fn #field_idents(&self) -> &Self::Value { &self.0[#indices] })*
+        }
+
         impl #rkvc_path::AttributeCount for #struct_name {
             type N = #rkvc_path::attributes::typenum::U::<#attribute_count>;
         }

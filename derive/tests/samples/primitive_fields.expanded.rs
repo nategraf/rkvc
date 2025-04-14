@@ -15,6 +15,82 @@ struct Primitives {
     m: bool,
     n: char,
 }
+trait PrimitivesIndex {
+    type Value;
+    ///Index into the container to access the element associated with [Primitives::a]
+    fn a(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::b]
+    fn b(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::c]
+    fn c(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::d]
+    fn d(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::e]
+    fn e(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::f]
+    fn f(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::g]
+    fn g(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::h]
+    fn h(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::i]
+    fn i(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::j]
+    fn j(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::k]
+    fn k(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::l]
+    fn l(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::m]
+    fn m(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [Primitives::n]
+    fn n(&self) -> &Self::Value;
+}
+impl<T> PrimitivesIndex for rkvc::AttributeArray<T, Primitives> {
+    type Value = T;
+    fn a(&self) -> &Self::Value {
+        &self.0[0usize]
+    }
+    fn b(&self) -> &Self::Value {
+        &self.0[1usize]
+    }
+    fn c(&self) -> &Self::Value {
+        &self.0[2usize]
+    }
+    fn d(&self) -> &Self::Value {
+        &self.0[3usize]
+    }
+    fn e(&self) -> &Self::Value {
+        &self.0[4usize]
+    }
+    fn f(&self) -> &Self::Value {
+        &self.0[5usize]
+    }
+    fn g(&self) -> &Self::Value {
+        &self.0[6usize]
+    }
+    fn h(&self) -> &Self::Value {
+        &self.0[7usize]
+    }
+    fn i(&self) -> &Self::Value {
+        &self.0[8usize]
+    }
+    fn j(&self) -> &Self::Value {
+        &self.0[9usize]
+    }
+    fn k(&self) -> &Self::Value {
+        &self.0[10usize]
+    }
+    fn l(&self) -> &Self::Value {
+        &self.0[11usize]
+    }
+    fn m(&self) -> &Self::Value {
+        &self.0[12usize]
+    }
+    fn n(&self) -> &Self::Value {
+        &self.0[13usize]
+    }
+}
 impl rkvc::AttributeCount for Primitives {
     type N = rkvc::attributes::typenum::U<14usize>;
 }

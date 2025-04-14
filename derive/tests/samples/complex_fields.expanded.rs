@@ -9,6 +9,32 @@ struct ComplexTypes {
     c: Option<u32>,
     d: CustomType,
 }
+trait ComplexTypesIndex {
+    type Value;
+    ///Index into the container to access the element associated with [ComplexTypes::a]
+    fn a(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [ComplexTypes::b]
+    fn b(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [ComplexTypes::c]
+    fn c(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [ComplexTypes::d]
+    fn d(&self) -> &Self::Value;
+}
+impl<T> ComplexTypesIndex for rkvc::AttributeArray<T, ComplexTypes> {
+    type Value = T;
+    fn a(&self) -> &Self::Value {
+        &self.0[0usize]
+    }
+    fn b(&self) -> &Self::Value {
+        &self.0[1usize]
+    }
+    fn c(&self) -> &Self::Value {
+        &self.0[2usize]
+    }
+    fn d(&self) -> &Self::Value {
+        &self.0[3usize]
+    }
+}
 impl rkvc::AttributeCount for ComplexTypes {
     type N = rkvc::attributes::typenum::U<4usize>;
 }

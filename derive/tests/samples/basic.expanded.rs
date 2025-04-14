@@ -4,6 +4,27 @@ struct BasicStruct {
     value2: u32,
     value3: String,
 }
+trait BasicStructIndex {
+    type Value;
+    ///Index into the container to access the element associated with [BasicStruct::value1]
+    fn value1(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [BasicStruct::value2]
+    fn value2(&self) -> &Self::Value;
+    ///Index into the container to access the element associated with [BasicStruct::value3]
+    fn value3(&self) -> &Self::Value;
+}
+impl<T> BasicStructIndex for rkvc::AttributeArray<T, BasicStruct> {
+    type Value = T;
+    fn value1(&self) -> &Self::Value {
+        &self.0[0usize]
+    }
+    fn value2(&self) -> &Self::Value {
+        &self.0[1usize]
+    }
+    fn value3(&self) -> &Self::Value {
+        &self.0[2usize]
+    }
+}
 impl rkvc::AttributeCount for BasicStruct {
     type N = rkvc::attributes::typenum::U<3usize>;
 }

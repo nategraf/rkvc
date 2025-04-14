@@ -3,6 +3,17 @@ use rkvc_derive::Attributes;
 struct BasicStruct {
     a: u64,
 }
+trait BasicStructIndex {
+    type Value;
+    ///Index into the container to access the element associated with [BasicStruct::a]
+    fn a(&self) -> &Self::Value;
+}
+impl<T> BasicStructIndex for rkvc::AttributeArray<T, BasicStruct> {
+    type Value = T;
+    fn a(&self) -> &Self::Value {
+        &self.0[0usize]
+    }
+}
 impl rkvc::AttributeCount for BasicStruct {
     type N = rkvc::attributes::typenum::U<1usize>;
 }
