@@ -12,6 +12,12 @@ trait BasicStructIndex {
     fn value2(&self) -> &Self::Value;
     ///Index into the container to access the element associated with [BasicStruct::value3]
     fn value3(&self) -> &Self::Value;
+    ///Mutably index into the container to modify the element associated with [BasicStruct::value1]
+    fn value1_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [BasicStruct::value2]
+    fn value2_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [BasicStruct::value3]
+    fn value3_mut(&mut self) -> &mut Self::Value;
 }
 impl<T> BasicStructIndex for rkvc::AttributeArray<T, BasicStruct> {
     type Value = T;
@@ -23,6 +29,15 @@ impl<T> BasicStructIndex for rkvc::AttributeArray<T, BasicStruct> {
     }
     fn value3(&self) -> &Self::Value {
         &self.0[2usize]
+    }
+    fn value1_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[0usize]
+    }
+    fn value2_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[1usize]
+    }
+    fn value3_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[2usize]
     }
 }
 impl rkvc::AttributeCount for BasicStruct {

@@ -216,6 +216,17 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         format!("Index into the container to access the element associated with [{struct_name}::{field_ident}]")
     }).collect();
 
+    // FIXME: The way this is done means that if there were a struct Foo { a: _, a_mut: _ }, this
+    // would result in an indicipherable compiler error.
+    let field_mut_idents: Vec<Ident> = field_idents
+        .iter()
+        .map(|field_ident| format_ident!("{field_ident}_mut"))
+        .collect();
+
+    let index_fn_mut_docs: Vec<String> = field_idents.iter().map(|field_ident| {
+        format!("Mutably index into the container to modify the element associated with [{struct_name}::{field_ident}]")
+    }).collect();
+
     // TODO: This breaks if the struct is generic.
     let attribute_count = fields.len();
     quote! {
@@ -223,12 +234,16 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
             type Value;
 
             #(#[doc = #index_fn_docs] fn #field_idents(&self) -> &Self::Value;)*
+
+            #(#[doc = #index_fn_mut_docs] fn #field_mut_idents(&mut self) -> &mut Self::Value;)*
         }
 
         impl<T> #index_trait_name for #rkvc_path::AttributeArray<T, #struct_name> {
             type Value = T;
 
             #(fn #field_idents(&self) -> &Self::Value { &self.0[#indices] })*
+
+            #(fn #field_mut_idents(&mut self) -> &mut Self::Value { &mut self.0[#indices] })*
         }
 
         impl #rkvc_path::AttributeCount for #struct_name {

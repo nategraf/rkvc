@@ -45,6 +45,34 @@ trait PrimitivesIndex {
     fn m(&self) -> &Self::Value;
     ///Index into the container to access the element associated with [Primitives::n]
     fn n(&self) -> &Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::a]
+    fn a_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::b]
+    fn b_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::c]
+    fn c_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::d]
+    fn d_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::e]
+    fn e_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::f]
+    fn f_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::g]
+    fn g_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::h]
+    fn h_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::i]
+    fn i_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::j]
+    fn j_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::k]
+    fn k_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::l]
+    fn l_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::m]
+    fn m_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [Primitives::n]
+    fn n_mut(&mut self) -> &mut Self::Value;
 }
 impl<T> PrimitivesIndex for rkvc::AttributeArray<T, Primitives> {
     type Value = T;
@@ -89,6 +117,48 @@ impl<T> PrimitivesIndex for rkvc::AttributeArray<T, Primitives> {
     }
     fn n(&self) -> &Self::Value {
         &self.0[13usize]
+    }
+    fn a_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[0usize]
+    }
+    fn b_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[1usize]
+    }
+    fn c_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[2usize]
+    }
+    fn d_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[3usize]
+    }
+    fn e_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[4usize]
+    }
+    fn f_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[5usize]
+    }
+    fn g_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[6usize]
+    }
+    fn h_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[7usize]
+    }
+    fn i_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[8usize]
+    }
+    fn j_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[9usize]
+    }
+    fn k_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[10usize]
+    }
+    fn l_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[11usize]
+    }
+    fn m_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[12usize]
+    }
+    fn n_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[13usize]
     }
 }
 impl rkvc::AttributeCount for Primitives {

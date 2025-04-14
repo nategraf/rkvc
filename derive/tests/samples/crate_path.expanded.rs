@@ -7,11 +7,16 @@ trait BasicStructIndex {
     type Value;
     ///Index into the container to access the element associated with [BasicStruct::a]
     fn a(&self) -> &Self::Value;
+    ///Mutably index into the container to modify the element associated with [BasicStruct::a]
+    fn a_mut(&mut self) -> &mut Self::Value;
 }
 impl<T> BasicStructIndex for rkvc::AttributeArray<T, BasicStruct> {
     type Value = T;
     fn a(&self) -> &Self::Value {
         &self.0[0usize]
+    }
+    fn a_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[0usize]
     }
 }
 impl rkvc::AttributeCount for BasicStruct {

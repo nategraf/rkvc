@@ -19,6 +19,14 @@ trait ComplexTypesIndex {
     fn c(&self) -> &Self::Value;
     ///Index into the container to access the element associated with [ComplexTypes::d]
     fn d(&self) -> &Self::Value;
+    ///Mutably index into the container to modify the element associated with [ComplexTypes::a]
+    fn a_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [ComplexTypes::b]
+    fn b_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [ComplexTypes::c]
+    fn c_mut(&mut self) -> &mut Self::Value;
+    ///Mutably index into the container to modify the element associated with [ComplexTypes::d]
+    fn d_mut(&mut self) -> &mut Self::Value;
 }
 impl<T> ComplexTypesIndex for rkvc::AttributeArray<T, ComplexTypes> {
     type Value = T;
@@ -33,6 +41,18 @@ impl<T> ComplexTypesIndex for rkvc::AttributeArray<T, ComplexTypes> {
     }
     fn d(&self) -> &Self::Value {
         &self.0[3usize]
+    }
+    fn a_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[0usize]
+    }
+    fn b_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[1usize]
+    }
+    fn c_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[2usize]
+    }
+    fn d_mut(&mut self) -> &mut Self::Value {
+        &mut self.0[3usize]
     }
 }
 impl rkvc::AttributeCount for ComplexTypes {
