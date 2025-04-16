@@ -1,7 +1,7 @@
 use core::ops::Mul;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use blake2::Blake2b512;
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_TABLE, ristretto::CompressedRistretto, RistrettoPoint, Scalar,
@@ -138,7 +138,7 @@ impl Issuer {
             .expiration()
             .unwrap()
             .decompress()
-            .ok_or(anyhow!("failed to decompress expiration commit"))?;
+            .context("failed to decompress expiration commit")?;
         expiration_commit -= RISTRETTO_BASEPOINT_TABLE.mul(&Scalar::from(at));
         *bulletproof.bulletproof_commits.expiration_mut() = Some(expiration_commit.compress());
 
