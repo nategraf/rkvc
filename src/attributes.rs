@@ -53,6 +53,17 @@ pub trait AttributeCount {
     type N: ArraySize + Debug;
 }
 
+/// Implemention of [AttributeCount] directly for any [ArraySize] (e.g. [U3][hybrid_array::sizes::U3]).
+///
+/// This allows methods that require a count of attributes, but not their labels or types (e.g.
+/// [PedersonGenerators][crate::pederson::PedersonGenerators]), to be used with the count alone.
+impl<N> AttributeCount for N
+where
+    N: ArraySize + Debug,
+{
+    type N = Self;
+}
+
 /// Labels for each field in the implementing type's [Attributes] encoding.
 ///
 /// Labels are used in cryptographic protocols as unique identifiers for the fields. As examples,

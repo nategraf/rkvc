@@ -8,8 +8,8 @@ use curve25519_dalek::{
     ristretto::{CompressedRistretto, RistrettoPoint},
     scalar::Scalar as RistrettoScalar,
 };
-use hybrid_array::{Array, ArraySize};
 use group::Group;
+use hybrid_array::{Array, ArraySize};
 use itertools::zip_eq;
 use rand::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
@@ -40,23 +40,28 @@ pub enum PedersonError {
 impl<G: Group + FromHash<OutputSize = U64>, N: ArraySize> PedersonGenerators<G, N> {
     /// Manually construct a set of Pederson commitment generators.
     ///
-    /// Discrete log relationship between the generators must be unknown to the part producing a
-    /// commitment using these generators. If the discreet log is know to the committer, they may
+    /// Discrete log relationship between the generators must be unknown to the party producing a
+    /// commitment using these generators. If the discrete log is known to the committer, they may
     /// be able to break the binding property of the commitment and produce two messages than can
     /// be opened from the same commitment.
-    pub fn new(blind_gen: G, attributes_gen: Array<G, N>) -> Self {
-        Self(blind_gen, attributes_gen)
+    pub fn new(blind_gen: G, attributes_gen: impl Into<Array<G, N>>) -> Self {
+        Self(blind_gen, attributes_gen.into())
+    }
+
+    /// Default generator point used for blinding commitments.
+    pub fn blind_gen_default() -> G {
+        G::hash_from_bytes::<Blake2b512>(b"rkvc::pederson::PedersonCommitment::blind_generator")
     }
 
     /// Generate a default set of generators from the given message type.
+    ///
+    /// Each attribute has a generator that is derived from the hash-to-group of its label.
     pub fn attributes_default<Msg>() -> PedersonGenerators<G, Msg::N>
     where
         Msg: AttributeLabels + AttributeCount<N = N>,
     {
         PedersonGenerators(
-            G::hash_from_bytes::<Blake2b512>(
-                b"rkvc::pederson::PedersonCommitment::blind_generator",
-            ),
+            Self::blind_gen_default(),
             Msg::label_iter()
                 .map(|label| G::hash_from_bytes::<Blake2b512>(label.as_bytes()))
                 .collect(),

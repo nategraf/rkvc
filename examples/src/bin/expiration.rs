@@ -10,7 +10,7 @@ use rkvc::{
     cmz::{Key, Mac, PublicParameters},
     range::Bulletproof,
     zkp::{Prover, Transcript, Verifier},
-    Attributes, UintEncoder,
+    Attributes, EncoderOutput, UintEncoder,
 };
 
 #[derive(Attributes, Clone, Debug)]
@@ -50,10 +50,7 @@ impl Credential {
 
         let (presentation, msg_variables) = self.mac.prove_presentation_constraints(
             &mut prover,
-            &self
-                .attributes
-                .attribute_walk(UintEncoder::default())
-                .collect(),
+            &UintEncoder::encode_attributes(&self.attributes).collect(),
             pp,
             rkvc::rand::thread_rng(),
         );

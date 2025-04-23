@@ -142,6 +142,7 @@ pub struct Constraint<CS: SchnorrCS> {
 }
 
 impl<CS: SchnorrCS> Constraint<CS> {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             linear_combination: Vec::new(),

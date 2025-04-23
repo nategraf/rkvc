@@ -8,8 +8,8 @@ use curve25519_dalek::{
     ristretto::CompressedRistretto,
     RistrettoPoint, Scalar as RistrettoScalar,
 };
-use hybrid_array::Array;
 use group::{Group, GroupEncoding};
+use hybrid_array::Array;
 use itertools::zip_eq;
 use rand::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
@@ -251,8 +251,9 @@ impl<Msg> PublicParameters<RistrettoPoint, Msg>
 where
     Msg: AttributeCount,
 {
-    /// H is used as the base point to commit to the first scalar in the key, x_0. It is
-    /// critical that it not have a known discreet log relative to G, the base point used to
+    /// H is used as the base point to commit to the first scalar in the key, x_0.
+    ///
+    /// It is critical that it not have a known discrete log relative to G, the base point used to
     /// commit to other key values.
     pub fn h() -> RistrettoPoint {
         RistrettoPoint::hash_from_bytes::<Blake2b512>(b"rvkc::cmz::Key::public_parameters::h")
