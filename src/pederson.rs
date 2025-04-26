@@ -9,14 +9,16 @@ use curve25519_dalek::{
     scalar::Scalar as RistrettoScalar,
 };
 use group::Group;
-use hybrid_array::{Array, ArraySize};
+use hybrid_array::Array;
 use itertools::zip_eq;
 use rand::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
 use typenum::U64;
 
 use crate::{
-    attributes::{AttributeCount, AttributeLabels, Attributes, IdentityEncoder, UintEncoder},
+    attributes::{
+        AttributeArray, AttributeCount, AttributeLabels, Attributes, IdentityEncoder, UintEncoder,
+    },
     hash::FromHash,
     zkp::{AllocScalarVar, CompactProof, Constraint, ProofError, Prover, Transcript, Verifier},
 };
@@ -28,7 +30,7 @@ pub struct PedersonCommitment<G, Msg> {
 }
 
 #[derive(Clone, Debug)]
-pub struct PedersonGenerators<G, N: ArraySize>(pub G, pub Array<G, N>);
+pub struct PedersonGenerators<G, Msg: AttributeCount>(pub G, pub AttributeArray<G, Msg>);
 
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
@@ -37,15 +39,15 @@ pub enum PedersonError {
     VerificationError,
 }
 
-impl<G: Group + FromHash<OutputSize = U64>, N: ArraySize> PedersonGenerators<G, N> {
+impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeCount> PedersonGenerators<G, Msg> {
     /// Manually construct a set of Pederson commitment generators.
     ///
     /// Discrete log relationship between the generators must be unknown to the party producing a
     /// commitment using these generators. If the discrete log is known to the committer, they may
     /// be able to break the binding property of the commitment and produce two messages than can
     /// be opened from the same commitment.
-    pub fn new(blind_gen: G, attributes_gen: impl Into<Array<G, N>>) -> Self {
-        Self(blind_gen, attributes_gen.into())
+    pub fn new(blind_gen: G, attributes_gen: impl Into<Array<G, Msg::N>>) -> Self {
+        Self(blind_gen, AttributeArray(attributes_gen.into()))
     }
 
     /// Default generator point used for blinding commitments.
@@ -56,9 +58,9 @@ impl<G: Group + FromHash<OutputSize = U64>, N: ArraySize> PedersonGenerators<G, 
     /// Generate a default set of generators from the given message type.
     ///
     /// Each attribute has a generator that is derived from the hash-to-group of its label.
-    pub fn attributes_default<Msg>() -> PedersonGenerators<G, Msg::N>
+    pub fn attributes_default() -> Self
     where
-        Msg: AttributeLabels + AttributeCount<N = N>,
+        Msg: AttributeLabels,
     {
         PedersonGenerators(
             Self::blind_gen_default(),
@@ -69,14 +71,14 @@ impl<G: Group + FromHash<OutputSize = U64>, N: ArraySize> PedersonGenerators<G, 
     }
 }
 
-impl<N: ArraySize> PedersonGenerators<RistrettoPoint, N> {
-    pub fn commit_with_blind<Msg>(
+impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
+    pub fn commit_with_blind(
         &self,
         msg: &Msg,
         blind: RistrettoScalar,
     ) -> PedersonCommitment<RistrettoPoint, Msg>
     where
-        Msg: Attributes<UintEncoder<RistrettoScalar>> + AttributeCount<N = N>,
+        Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
         // NOTE: It would be more performant to use curve25519_dalek::MultiscalarMul here, but that
         // requires the iterators to have an exact size. Panics at runtime otherwise. This could be
@@ -94,26 +96,26 @@ impl<N: ArraySize> PedersonGenerators<RistrettoPoint, N> {
         }
     }
 
-    pub fn commit<Msg>(
+    pub fn commit(
         &self,
         msg: &Msg,
         mut rng: impl RngCore + CryptoRng,
     ) -> (PedersonCommitment<RistrettoPoint, Msg>, RistrettoScalar)
     where
-        Msg: Attributes<UintEncoder<RistrettoScalar>> + AttributeCount<N = N>,
+        Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
         let blind = RistrettoScalar::random(&mut rng);
         (self.commit_with_blind(msg, blind), blind)
     }
 
-    pub fn open<Msg>(
+    pub fn open(
         &self,
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
         msg: &Msg,
         blind: RistrettoScalar,
     ) -> Result<(), PedersonError>
     where
-        Msg: Attributes<UintEncoder<RistrettoScalar>> + AttributeCount<N = N>,
+        Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
         let eq = commit.elem.ct_eq(&self.commit_with_blind(msg, blind).elem);
         match eq.into() {
@@ -125,7 +127,7 @@ impl<N: ArraySize> PedersonGenerators<RistrettoPoint, N> {
     /// Prove knowledge of an opening for the given commitment.
     ///
     /// This function is paired with [PedersonGenerators::verify_opening].
-    pub fn prove_opening<Msg>(
+    pub fn prove_opening(
         &self,
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
         msg: &Msg,
@@ -160,7 +162,7 @@ impl<N: ArraySize> PedersonGenerators<RistrettoPoint, N> {
     /// valid.
     ///
     /// This function is paired with [PedersonGenerators::prove_opening].
-    pub fn verify_opening<Msg>(
+    pub fn verify_opening(
         &self,
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
         proof: &CompactProof,
@@ -185,7 +187,7 @@ impl<N: ArraySize> PedersonGenerators<RistrettoPoint, N> {
     /// other statements being proven.
     ///
     /// This function is paired with [PedersonGenerators::constrain_opening].
-    pub fn prove_opening_constraints<X, Msg>(
+    pub fn prove_opening_constraints<X>(
         &self,
         prover: &mut Prover,
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
@@ -234,7 +236,7 @@ impl<N: ArraySize> PedersonGenerators<RistrettoPoint, N> {
     /// field should be a u64, these constraints do not ensure it is in range withing the field)
     ///
     /// This function is paired with [PedersonGenerators::prove_opening_constraints].
-    pub fn constrain_opening<X, Msg>(
+    pub fn constrain_opening<X>(
         &self,
         verifier: &mut Verifier,
         commit: &PedersonCommitment<RistrettoPoint, Msg>,
@@ -254,7 +256,7 @@ impl<N: ArraySize> PedersonGenerators<RistrettoPoint, N> {
             .constrain_opening(verifier, &commit.compress(), msg_vars)
     }
 
-    pub fn compress(&self) -> PedersonGenerators<CompressedRistretto, N> {
+    pub fn compress(&self) -> PedersonGenerators<CompressedRistretto, Msg> {
         PedersonGenerators(
             self.0.compress(),
             self.1.iter().map(|g| g.compress()).collect(),
@@ -262,7 +264,7 @@ impl<N: ArraySize> PedersonGenerators<RistrettoPoint, N> {
     }
 }
 
-impl<N: ArraySize> PedersonGenerators<CompressedRistretto, N> {
+impl<Msg: AttributeCount> PedersonGenerators<CompressedRistretto, Msg> {
     /// Add constraints for knowledge of an opening for the given commitment to a [Verifier].
     ///
     /// Note that if the message contains fields that are not in the constraint system's native
@@ -270,7 +272,7 @@ impl<N: ArraySize> PedersonGenerators<CompressedRistretto, N> {
     /// field should be a u64, these constraints do not ensure it is in range withing the field)
     ///
     /// This function is paired with [PedersonGenerators::prove_opening_constraints].
-    pub fn constrain_opening<X, Msg>(
+    pub fn constrain_opening<X>(
         &self,
         verifier: &mut Verifier,
         commit: &PedersonCommitment<CompressedRistretto, Msg>,
@@ -304,13 +306,13 @@ impl<N: ArraySize> PedersonGenerators<CompressedRistretto, N> {
         Ok(())
     }
 
-    pub fn decompress(&self) -> Option<PedersonGenerators<RistrettoPoint, N>> {
+    pub fn decompress(&self) -> Option<PedersonGenerators<RistrettoPoint, Msg>> {
         Some(PedersonGenerators(
             self.0.decompress()?,
             self.1
                 .iter()
                 .map(|g| g.decompress())
-                .collect::<Option<Array<_, _>>>()?,
+                .collect::<Option<AttributeArray<_, _>>>()?,
         ))
     }
 }
@@ -320,7 +322,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     where
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::attributes_default::<Msg>().commit_with_blind(msg, blind)
+        PedersonGenerators::attributes_default().commit_with_blind(msg, blind)
     }
 
     pub fn commit<R>(msg: &Msg, rng: &mut R) -> (Self, RistrettoScalar)
@@ -328,7 +330,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
         R: RngCore + CryptoRng + ?Sized,
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::attributes_default::<Msg>().commit(msg, rng)
+        PedersonGenerators::attributes_default().commit(msg, rng)
     }
 
     // TODO: The following methods, with &self receivers, have a sharp edge in that if the commit
@@ -338,7 +340,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     where
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::attributes_default::<Msg>().open(self, msg, blind)
+        PedersonGenerators::attributes_default().open(self, msg, blind)
     }
 
     /// Prove knowledge of an opening for this commitment, using the default [PedersonGenerators]
@@ -349,7 +351,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     where
         Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::attributes_default::<Msg>().prove_opening(self, msg, blind)
+        PedersonGenerators::attributes_default().prove_opening(self, msg, blind)
     }
 
     /// Verify knowledge of an opening for this commitment, using the default [PedersonGenerators]
@@ -365,7 +367,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     where
         Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::attributes_default::<Msg>().verify_opening(self, proof)
+        PedersonGenerators::attributes_default().verify_opening(self, proof)
     }
 
     /// Adds the constraints for the commitment opening to a [Prover], using the default
@@ -383,7 +385,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
         for<'a> Prover<'a>: AllocScalarVar<X, Error = Infallible>,
         X: Copy,
     {
-        PedersonGenerators::attributes_default::<Msg>()
+        PedersonGenerators::attributes_default()
             .prove_opening_constraints(prover, self, msg_vars, blind)
     }
 
@@ -405,7 +407,7 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
         for<'a> Verifier<'a>: AllocScalarVar<X, Error = ProofError>,
         X: Copy,
     {
-        PedersonGenerators::<RistrettoPoint, _>::attributes_default::<Msg>()
+        PedersonGenerators::<RistrettoPoint, Msg>::attributes_default()
             .constrain_opening(verifier, self, msg_vars)
     }
 
@@ -436,7 +438,7 @@ impl<Msg> PedersonCommitment<CompressedRistretto, Msg> {
         for<'a> Verifier<'a>: AllocScalarVar<X, Error = ProofError>,
         X: Copy,
     {
-        PedersonGenerators::<RistrettoPoint, _>::attributes_default::<Msg>()
+        PedersonGenerators::<RistrettoPoint, Msg>::attributes_default()
             .compress()
             .constrain_opening(verifier, self, msg_vars)
     }

@@ -16,7 +16,7 @@ use subtle::ConstantTimeEq;
 use typenum::Unsigned;
 
 use crate::{
-    attributes::{AttributeCount, Attributes, IdentityEncoder, UintEncoder},
+    attributes::{AttributeArray, AttributeCount, Attributes, IdentityEncoder, UintEncoder},
     pederson::{PedersonCommitment, PedersonGenerators},
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover, SchnorrCS,
@@ -27,13 +27,13 @@ use crate::{
 // TODO: A weakness exists with the current design that needs to be mitigated with the addition of
 // an extra key element. I need to learn the specifics of this weakness and address this.
 #[derive(Clone)]
-pub struct Key<F, Msg>(F, Array<F, Msg::N>)
+pub struct Key<F, Msg>(F, AttributeArray<F, Msg>)
 where
     Msg: AttributeCount;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct PublicParameters<G, Msg>(G, Array<G, Msg::N>)
+pub struct PublicParameters<G, Msg>(G, AttributeArray<G, Msg>)
 where
     Msg: AttributeCount;
 
@@ -51,7 +51,7 @@ where
 {
     pub u: G,
     pub commit_v: G,
-    pub commit_msg: Array<G, Msg::N>,
+    pub commit_msg: AttributeArray<G, Msg>,
 }
 
 #[non_exhaustive]
@@ -200,7 +200,7 @@ where
         &self,
         verifier: &mut Verifier<'a>,
         pres: &Presentation<CompressedRistretto, Msg>,
-    ) -> Result<Array<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg::N>, Error> {
+    ) -> Result<AttributeArray<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg>, Error> {
         let u = pres.u.decompress().ok_or(Error::DecompressFailed)?;
         // NOTE: Unwrapping the CtChoice is ok here because U is non-private.
         if u.is_identity().into() {
@@ -242,7 +242,7 @@ where
     /// Uses the group generator here as the blind generator as a requirement to then be
     /// able to remove the blinding from the final MAC. Without this, the blinding factor for a
     /// commit would need to be carried as part of the MAC.
-    pub fn into_pederson(self) -> PedersonGenerators<G, Msg::N> {
+    pub fn into_pederson(self) -> PedersonGenerators<G, Msg> {
         PedersonGenerators(G::generator(), self.1)
     }
 }
@@ -277,7 +277,7 @@ where
             self.1
                 .iter()
                 .map(|pp_i| pp_i.decompress())
-                .collect::<Option<Array<_, _>>>()?,
+                .collect::<Option<AttributeArray<_, _>>>()?,
         ))
     }
 }
@@ -347,7 +347,7 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
         mut rng: impl RngCore + CryptoRng,
     ) -> (
         Presentation<CompressedRistretto, Msg>,
-        Array<<Prover<'a> as SchnorrCS>::ScalarVar, Msg::N>,
+        AttributeArray<<Prover<'a> as SchnorrCS>::ScalarVar, Msg>,
     )
     where
         Msg: AttributeCount,
@@ -356,12 +356,12 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
         let commit_v_blind_point = PublicParameters::<RistrettoPoint, Msg>::h().mul(r_v);
         let commit_v = self.v + commit_v_blind_point;
 
-        let r: Array<RistrettoScalar, Msg::N> = (0..Msg::N::USIZE)
+        let r: AttributeArray<RistrettoScalar, Msg> = (0..Msg::N::USIZE)
             .map(|_| RistrettoScalar::random(&mut rng))
             .collect();
         let commit_msg = zip_eq(msg_encoded.as_slice(), r.as_slice())
             .map(|(m_i, r_i)| self.u.mul(m_i) + RISTRETTO_BASEPOINT_TABLE.mul(r_i))
-            .collect::<Array<RistrettoPoint, Msg::N>>();
+            .collect::<AttributeArray<RistrettoPoint, Msg>>();
         let z = zip_eq(r.as_slice(), pp.1.as_slice())
             .map(|(r_i, pp_i)| pp_i.mul(r_i))
             .sum::<RistrettoPoint>()
@@ -400,7 +400,7 @@ fn constrain_presentation<'a, Msg: AttributeCount>(
     z: RistrettoPoint,
     pp: &PublicParameters<CompressedRistretto, Msg>,
     commit_msg: &Array<CompressedRistretto, Msg::N>,
-) -> Result<Array<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg::N>, crate::zkp::ProofError> {
+) -> Result<AttributeArray<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg>, crate::zkp::ProofError> {
     // A small macro to construct the labels for variables that get added to the transcript.
     macro_rules! label {
         ($s:literal) => {
@@ -410,7 +410,7 @@ fn constrain_presentation<'a, Msg: AttributeCount>(
     // Allocate variables used in multiple constraint declarations.
     let g_var = verifier.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
     let u_var = verifier.alloc_point((label!("u"), u))?;
-    let r_vars: Array<_, Msg::N> =
+    let r_vars: AttributeArray<_, Msg> =
         verifier.alloc_scalars((0..Msg::N::USIZE).map(|_| label!("r_i")))?;
 
     // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
@@ -431,7 +431,7 @@ fn constrain_presentation<'a, Msg: AttributeCount>(
     constraint_z.eq(verifier, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
-    let m_vars: Array<_, Msg::N> =
+    let m_vars: AttributeArray<_, Msg> =
         verifier.alloc_scalars((0..Msg::N::USIZE).map(|_| label!("m_i")))?;
     for (r_i_var, (m_var, c_i)) in zip_eq(
         r_vars.as_slice(),
@@ -457,7 +457,7 @@ fn prove_presentation_constraints<'a, Msg>(
     msg: &Array<RistrettoScalar, Msg::N>,
     pp: &PublicParameters<RistrettoPoint, Msg>,
     commit_msg: &Array<RistrettoPoint, Msg::N>,
-) -> Result<Array<<Prover<'a> as SchnorrCS>::ScalarVar, Msg::N>, Infallible>
+) -> Result<AttributeArray<<Prover<'a> as SchnorrCS>::ScalarVar, Msg>, Infallible>
 where
     Msg: AttributeCount,
 {
@@ -471,7 +471,7 @@ where
     // Allocate variables used in multiple constraint declarations.
     let g_var = prover.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
     let u_var = prover.alloc_point((label!("u"), u))?;
-    let r_vars: Array<_, Msg::N> =
+    let r_vars: AttributeArray<_, Msg> =
         prover.alloc_scalars(r.iter().map(|r_i| (label!("r_i"), *r_i)))?;
 
     // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
@@ -489,7 +489,7 @@ where
     constraint_z.eq(prover, (label!("z"), z))?;
 
     // Constrain each C_i = m_i * U + r_i * G
-    let m_vars: Array<_, Msg::N> =
+    let m_vars: AttributeArray<_, Msg> =
         prover.alloc_scalars(msg.iter().map(|m_i| (label!("m_i"), *m_i)))?;
     let iter = zip_eq(
         zip_eq(m_vars.as_slice(), r_vars.as_slice()),
