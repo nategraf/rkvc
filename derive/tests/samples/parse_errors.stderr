@@ -4,7 +4,7 @@ error: expected attribute arguments in parentheses: `rkvc(...)`
 4 | #[rkvc]
   |   ^^^^
 
-error: Unknown attribute name
+error: Unknown attribute key: only valid key is 'crate_path'
   --> tests/samples/parse_errors.rs:10:8
    |
 10 | #[rkvc(foo = "bar")]
@@ -15,3 +15,21 @@ error: expected string literal
    |
 16 | #[rkvc(crate_path = rkvc)]
    |                     ^^^^
+
+error: Unknown attribute key: only valid key is 'label'
+  --> tests/samples/parse_errors.rs:23:12
+   |
+23 |     #[rkvc(foo = "bar")]
+   |            ^^^
+
+error: expected attribute arguments in parentheses: `rkvc(...)`
+  --> tests/samples/parse_errors.rs:29:7
+   |
+29 |     #[rkvc]
+   |       ^^^^
+
+error: expected string literal
+  --> tests/samples/parse_errors.rs:35:20
+   |
+35 |     #[rkvc(label = foo)]
+   |                    ^^^

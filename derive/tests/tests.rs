@@ -8,6 +8,7 @@ fn build() {
     t.pass("tests/samples/crate_path.rs");
     t.compile_fail("tests/samples/parse_errors.rs");
     t.pass("tests/samples/visibilities.rs");
+    t.pass("tests/samples/labeled.rs");
 }
 
 #[test]

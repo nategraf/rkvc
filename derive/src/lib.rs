@@ -51,6 +51,7 @@ struct DeriveAttributesField {
     ty: TypePath,
     vis: Visibility,
     is_primitive_type: bool,
+    label: Option<LitStr>,
 }
 
 impl Parse for DeriveAttributesInput {
@@ -74,7 +75,7 @@ impl Parse for DeriveAttributesInput {
                     custom_crate_path = Some(Ident::new(&lit_str.value(), meta.path.span()));
                     Ok(())
                 }
-                _ => Err(meta.error("Unknown attribute name")),
+                _ => Err(meta.error("Unknown attribute key: only valid key is 'crate_path'")),
             })?;
         }
 
@@ -128,11 +129,33 @@ impl Parse for DeriveAttributesInput {
                     .clone()
                     .ok_or_else(|| syn::Error::new(f.span(), "Only named fields are supported"))?;
                 let is_primitive = is_primitive_type(ty_path);
+
+                // Parse and `#[rkvc(...)]` attribute on the field.
+                let mut label: Option<LitStr> = None;
+                for attr in &f.attrs {
+                    if !attr.path().is_ident("rkvc") {
+                        continue;
+                    }
+
+                    // Require that the attribute use the list notation (i.e. disallow "#[rkvc]").
+                    attr.meta.require_list()?;
+
+                    attr.parse_nested_meta(|meta| match meta {
+                        meta if meta.path.is_ident("label") => {
+                            let lit_str = meta.value()?.parse::<LitStr>()?;
+                            label = Some(lit_str);
+                            Ok(())
+                        }
+                        _ => Err(meta.error("Unknown attribute key: only valid key is 'label'")),
+                    })?;
+                }
+
                 Ok(DeriveAttributesField {
                     ident,
                     ty: ty_path.clone(),
                     vis: f.vis.clone(),
                     is_primitive_type: is_primitive,
+                    label,
                 })
             })
             .collect::<syn::Result<_>>()?;
@@ -207,12 +230,17 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         .collect()
     };
 
-    // TODO: Add a #[label = "foo"] attribute that can be used to specify the field label manually.
     // TODO: Support numerical index assignment other than sequential and adjust accordingly.
     let indices: Vec<usize> = (0..fields.len()).collect();
-    let field_labels: Vec<String> = fields
+    let field_labels: Vec<LitStr> = fields
         .iter()
-        .map(|f| format!("{}::{}", struct_name, f.ident))
+        .map(|f| {
+            if let Some(ref label) = f.label {
+                return label.clone();
+            }
+            let ident = &f.ident;
+            LitStr::new(&format!("{struct_name}::{ident}"), Span::call_site())
+        })
         .collect();
 
     // Collect the information needed to build the Index trait.
