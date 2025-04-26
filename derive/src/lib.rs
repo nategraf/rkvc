@@ -49,7 +49,6 @@ struct DeriveAttributesInput {
 struct DeriveAttributesField {
     ident: Ident,
     ty: TypePath,
-    #[allow(dead_code)]
     vis: Visibility,
     is_primitive_type: bool,
 }
@@ -217,22 +216,26 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         .collect();
 
     // Collect the information needed to build the Index trait.
-    // TODO: How should this deal with non-pub fields?
+    // Only pub fields get a derived index function name.
     let index_trait_name: Ident = format_ident!("{struct_name}Index");
-    let field_idents: Vec<Ident> = fields.iter().map(|f| f.ident.clone()).collect();
+    let index_field_idents: Vec<Ident> = fields
+        .iter()
+        .filter(|f| matches!(f.vis, Visibility::Public(_)))
+        .map(|f| f.ident.clone())
+        .collect();
 
-    let index_fn_docs: Vec<String> = field_idents.iter().map(|field_ident| {
+    let index_fn_docs: Vec<String> = index_field_idents.iter().map(|field_ident| {
         format!("Index into the container to access the element associated with [{struct_name}::{field_ident}]")
     }).collect();
 
     // FIXME: The way this is done means that if there were a struct Foo { a: _, a_mut: _ }, this
     // would result in an indicipherable compiler error.
-    let field_mut_idents: Vec<Ident> = field_idents
+    let index_mut_field_idents: Vec<Ident> = index_field_idents
         .iter()
         .map(|field_ident| format_ident!("{field_ident}_mut"))
         .collect();
 
-    let index_fn_mut_docs: Vec<String> = field_idents.iter().map(|field_ident| {
+    let index_fn_mut_docs: Vec<String> = index_field_idents.iter().map(|field_ident| {
         format!("Mutably index into the container to modify the element associated with [{struct_name}::{field_ident}]")
     }).collect();
 
@@ -242,17 +245,17 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         trait #index_trait_name {
             type Value;
 
-            #(#[doc = #index_fn_docs] fn #field_idents(&self) -> &Self::Value;)*
+            #(#[doc = #index_fn_docs] fn #index_field_idents(&self) -> &Self::Value;)*
 
-            #(#[doc = #index_fn_mut_docs] fn #field_mut_idents(&mut self) -> &mut Self::Value;)*
+            #(#[doc = #index_fn_mut_docs] fn #index_mut_field_idents(&mut self) -> &mut Self::Value;)*
         }
 
         impl<T> #index_trait_name for #rkvc_path::AttributeArray<T, #struct_name> {
             type Value = T;
 
-            #(fn #field_idents(&self) -> &Self::Value { &self.0[#indices] })*
+            #(fn #index_field_idents(&self) -> &Self::Value { &self.0[#indices] })*
 
-            #(fn #field_mut_idents(&mut self) -> &mut Self::Value { &mut self.0[#indices] })*
+            #(fn #index_mut_field_idents(&mut self) -> &mut Self::Value { &mut self.0[#indices] })*
         }
 
         impl #rkvc_path::AttributeCount for #struct_name {

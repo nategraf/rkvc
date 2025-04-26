@@ -5,7 +5,7 @@ use rkvc_derive::Attributes;
 #[derive(Attributes)]
 #[rkvc(crate_path = "rkvc")]
 struct BasicStruct {
-    a: u64,
+    pub a: u64,
 }
 
 fn main() {}

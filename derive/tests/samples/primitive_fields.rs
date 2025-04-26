@@ -2,20 +2,20 @@ use rkvc_derive::Attributes;
 
 #[derive(Attributes)]
 struct Primitives {
-    a: u8,
-    b: u16,
-    c: u32,
-    d: u64,
-    e: u128,
-    f: usize,
-    g: i8,
-    h: i16,
-    i: i32,
-    j: i64,
-    k: i128,
-    l: isize,
-    m: bool,
-    n: char,
+    pub a: u8,
+    pub b: u16,
+    pub c: u32,
+    pub d: u64,
+    pub e: u128,
+    pub f: usize,
+    pub g: i8,
+    pub h: i16,
+    pub i: i32,
+    pub j: i64,
+    pub k: i128,
+    pub l: isize,
+    pub m: bool,
+    pub n: char,
 }
 
 fn main() {}

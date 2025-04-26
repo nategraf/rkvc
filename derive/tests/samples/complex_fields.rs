@@ -7,10 +7,10 @@ struct CustomType {
 
 #[derive(Attributes)]
 struct ComplexTypes {
-    a: Vec<u32>,
-    b: HashMap<String, u64>,
-    c: Option<u32>,
-    d: CustomType,
+    pub a: Vec<u32>,
+    pub b: HashMap<String, u64>,
+    pub c: Option<u32>,
+    pub d: CustomType,
 }
 
 fn main() {}
