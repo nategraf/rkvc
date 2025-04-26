@@ -7,10 +7,8 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input, parse_quote,
-    punctuated::Punctuated,
     spanned::Spanned,
-    token::Comma,
-    Data, DeriveInput, Field, Fields, Ident, LitStr, Type,
+    Data, DeriveInput, Fields, Ident, LitStr, Type, TypePath, Visibility,
 };
 
 // TODO: Fill this in, copying from below.
@@ -44,7 +42,16 @@ struct DeriveAttributesInput {
     /// List of fields on the parsed struct.
     ///
     /// Only named fields are currently supported.
-    fields: Punctuated<Field, Comma>,
+    fields: Vec<DeriveAttributesField>,
+}
+
+/// Parsed field input for the `Attributes` macro.
+struct DeriveAttributesField {
+    ident: Ident,
+    ty: TypePath,
+    #[allow(dead_code)]
+    vis: Visibility,
+    is_primitive_type: bool,
 }
 
 impl Parse for DeriveAttributesInput {
@@ -83,7 +90,7 @@ impl Parse for DeriveAttributesInput {
         });
 
         // Extract the list of named fields.
-        let fields = match input.data {
+        let input_fields = match input.data {
             Data::Struct(data) => match data.fields {
                 Fields::Named(fields) => fields.named,
                 _ => {
@@ -100,12 +107,36 @@ impl Parse for DeriveAttributesInput {
                 ))
             }
         };
-        if fields.is_empty() {
+        if input_fields.is_empty() {
             return Err(syn::Error::new(
                 Span::call_site(),
                 "Empty structs are not supported",
             ));
         }
+
+        // Parse and validate each field.
+        let fields: Vec<DeriveAttributesField> = input_fields
+            .iter()
+            .map(|f| {
+                let Type::Path(ref ty_path) = f.ty else {
+                    return Err(syn::Error::new(
+                        f.ty.span(),
+                        "Only type paths are supported",
+                    ));
+                };
+                let ident = f
+                    .ident
+                    .clone()
+                    .ok_or_else(|| syn::Error::new(f.span(), "Only named fields are supported"))?;
+                let is_primitive = is_primitive_type(ty_path);
+                Ok(DeriveAttributesField {
+                    ident,
+                    ty: ty_path.clone(),
+                    vis: f.vis.clone(),
+                    is_primitive_type: is_primitive,
+                })
+            })
+            .collect::<syn::Result<_>>()?;
 
         Ok(DeriveAttributesInput {
             crate_path,
@@ -124,30 +155,16 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
 
     // Collect all the types found on fields in the struct, as they will presented to the encoder.
     // Primitve types (i.e. uints, ints, bool, char) passed by value, others passed by reference.
-    let attribute_types_res: syn::Result<Vec<_>> = fields
+    let attribute_types: Vec<Type> = fields
         .iter()
-        .map(|f| -> syn::Result<Type> {
-            match f.ty {
-                Type::Path(ref p) => match is_primitive_type(p) {
-                    true => Ok(f.ty.clone()),
-                    false => {
-                        let ty = f.ty.clone();
-                        Ok(parse_quote!(&#ty))
-                    }
-                },
-                // TODO: Move this fallible step into the parse impl.
-                _ => Err(syn::Error::new(
-                    f.ty.span(),
-                    "Only type paths are supported",
-                )),
+        .map(|f| match f.is_primitive_type {
+            true => f.ty.clone().into(),
+            false => {
+                let ty = f.ty.clone();
+                parse_quote!(&#ty)
             }
         })
         .collect();
-
-    let attribute_types = match attribute_types_res {
-        Ok(a) => a,
-        Err(err) => return err.into_compile_error().into(),
-    };
 
     // Construct the argument(s) to the encode methods. Take a refernce if the field is a
     // non-primitive type.
@@ -156,10 +173,10 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         .iter(),
         attribute_types.iter())
         .map(|(f, attr_ty)| {
-            let ident = f.ident.as_ref().unwrap();
+            let ident = &f.ident;
             match attr_ty {
-                Type::Path(_) => quote_spanned!(f.span() => self.#ident),
-                Type::Reference(_) => quote_spanned!(f.span() => &self.#ident),
+                Type::Path(_) => quote_spanned!(ident.span() => self.#ident),
+                Type::Reference(_) => quote_spanned!(ident.span() => &self.#ident),
                 _ => unreachable!("macro implementation error: checks failed to ensure exhaustive handling of field types"),
             }
         })
@@ -196,21 +213,13 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
     let indices: Vec<usize> = (0..fields.len()).collect();
     let field_labels: Vec<String> = fields
         .iter()
-        .map(|f| f.ident.as_ref().unwrap())
-        .map(|name| format!("{}::{}", struct_name, name))
+        .map(|f| format!("{}::{}", struct_name, f.ident))
         .collect();
 
     // Collect the information needed to build the Index trait.
     // TODO: How should this deal with non-pub fields?
     let index_trait_name: Ident = format_ident!("{struct_name}Index");
-    let field_idents: Vec<Ident> = fields
-        .iter()
-        .map(|f| {
-            f.ident
-                .clone()
-                .expect("macro implementation error: failed to get ident for field")
-        })
-        .collect();
+    let field_idents: Vec<Ident> = fields.iter().map(|f| f.ident.clone()).collect();
 
     let index_fn_docs: Vec<String> = field_idents.iter().map(|field_ident| {
         format!("Index into the container to access the element associated with [{struct_name}::{field_ident}]")
