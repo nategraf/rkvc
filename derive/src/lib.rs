@@ -246,10 +246,11 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
     // Collect the information needed to build the Index trait.
     // Only pub fields get a derived index function name.
     let index_trait_name: Ident = format_ident!("{struct_name}Index");
-    let index_field_idents: Vec<Ident> = fields
+    let (index_field_indices, index_field_idents): (Vec<usize>, Vec<Ident>) = fields
         .iter()
-        .filter(|f| matches!(f.vis, Visibility::Public(_)))
-        .map(|f| f.ident.clone())
+        .enumerate()
+        .filter(|(_, f)| matches!(f.vis, Visibility::Public(_)))
+        .map(|(i, f)| (i, f.ident.clone()))
         .collect();
 
     let index_fn_docs: Vec<String> = index_field_idents.iter().map(|field_ident| {
@@ -281,9 +282,9 @@ pub fn derive_attributes(input: TokenStream) -> TokenStream {
         impl<T> #index_trait_name for #rkvc_path::AttributeArray<T, #struct_name> {
             type Value = T;
 
-            #(fn #index_field_idents(&self) -> &Self::Value { &self.0[#indices] })*
+            #(fn #index_field_idents(&self) -> &Self::Value { &self.0[#index_field_indices] })*
 
-            #(fn #index_mut_field_idents(&mut self) -> &mut Self::Value { &mut self.0[#indices] })*
+            #(fn #index_mut_field_idents(&mut self) -> &mut Self::Value { &mut self.0[#index_field_indices] })*
         }
 
         impl #rkvc_path::AttributeCount for #struct_name {
