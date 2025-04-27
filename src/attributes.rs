@@ -39,7 +39,8 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use hybrid_array::{Array, ArraySize};
+use curve25519_dalek::Scalar as RistrettoScalar;
+use hybrid_array::{sizes::U1, Array, ArraySize};
 use typenum::Unsigned;
 
 #[cfg(feature = "derive")]
@@ -50,18 +51,41 @@ pub use typenum;
 
 /// Count of the fields in the implementing type's [Attributes] encoding.
 pub trait AttributeCount {
-    type N: ArraySize + Debug;
+    type N: ArraySize + Debug + Eq;
 }
 
-/// Implemention of [AttributeCount] directly for any [ArraySize] (e.g. [U3][hybrid_array::sizes::U3]).
+/// Implementation of [AttributeCount] directly for [RistrettoScalar].
+// NOTE: This is not implemented for arbitrary Field types because a blanket implementation of a
+// foreign trait can conflict with any implementations in downstream crates.
+impl AttributeCount for RistrettoScalar {
+    type N = U1;
+}
+
+/// Implementation of [AttributeLabels] directly for [RistrettoScalar].
+// NOTE: This is not implemented for arbitrary Field types because a blanket implementation of a
+// TODO: Consider whether it wise to give this common label to a value.
+impl AttributeLabels for RistrettoScalar {
+    fn label_at(i: usize) -> Option<&'static str> {
+        // NOTE: Label is chosen to represent the "one-tuple" of an unknown message. If I end up
+        // implementating Attributes over more tuples, they will have labels based on position.
+        (i == 0).then_some("rkvc::attributes::_::0")
+    }
+}
+
+/// Implementation of [Attributes] directly for [RistrettoScalar].
 ///
-/// This allows methods that require a count of attributes, but not their labels or types (e.g.
-/// [PedersonGenerators][crate::pederson::PedersonGenerators]), to be used with the count alone.
-impl<N> AttributeCount for N
+/// A [RistrettoScalar] is considered to be a single attribute with a common label.
+impl<E> Attributes<E> for RistrettoScalar
 where
-    N: ArraySize + Debug,
+    E: for<'a> Encoder<&'a Self>,
 {
-    type N = Self;
+    fn attribute_at(&self, i: usize, encoder: &mut E) -> Option<<E as EncoderOutput>::Output> {
+        (i == 0).then_some(encoder.encode_value(self))
+    }
+
+    fn attribute_type_at(i: usize, encoder: &mut E) -> Option<<E as EncoderOutput>::TypeOutput> {
+        (i == 0).then_some(encoder.encode_type())
+    }
 }
 
 /// Labels for each field in the implementing type's [Attributes] encoding.

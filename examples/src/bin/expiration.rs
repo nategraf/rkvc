@@ -1,13 +1,11 @@
-use core::ops::Mul;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use blake2::Blake2b512;
-use curve25519_dalek::{
-    constants::RISTRETTO_BASEPOINT_TABLE, ristretto::CompressedRistretto, RistrettoPoint, Scalar,
-};
+use curve25519_dalek::{ristretto::CompressedRistretto, RistrettoPoint, Scalar};
 use rkvc::{
     cmz::{Key, Mac, PublicParameters},
+    pederson::PedersonCommitment,
     range::Bulletproof,
     zkp::{Prover, Transcript, Verifier},
     Attributes, EncoderOutput, UintEncoder,
@@ -54,32 +52,28 @@ impl Credential {
             pp,
             rkvc::rand::thread_rng(),
         );
-        let (mut bulletproof_commits, mut bulletproof_openings) =
-            Bulletproof::prove_range_commit_constaints(
-                &mut prover,
-                &msg_variables,
-                &self.attributes,
-            )?;
+        let mut bulletproof_openings = Bulletproof::prove_range_commit_constaints(
+            &mut prover,
+            &msg_variables,
+            &self.attributes,
+        )?;
 
         let schnorr_proof = prover.prove_compact();
 
         // Subtract the current timestamp `at` from the commitmentted value. The result will only
         // be in the u64 range if it is greater than or equal to `at`.
-        let expiration_commit: RistrettoPoint = bulletproof_commits.expiration().unwrap();
-        *bulletproof_commits.expiration_mut().as_mut().unwrap() -=
-            RISTRETTO_BASEPOINT_TABLE.mul(&Scalar::from(at));
         let (expiration, expiration_blind) = bulletproof_openings.expiration().unwrap();
         *bulletproof_openings.expiration_mut() =
             Some((expiration - Scalar::from(at), expiration_blind));
 
-        let mut bulletproof = Bulletproof::prove_bulletproof(
-            &mut transcript,
-            &bulletproof_commits,
-            &bulletproof_openings,
-        )?;
+        let mut bulletproof =
+            Bulletproof::prove_bulletproof(&mut transcript, &bulletproof_openings)?;
 
-        // Reset the value in the commit, which will be used for the DLEQ check with CMZ commit.
-        *bulletproof.bulletproof_commits.expiration_mut() = Some(expiration_commit.compress());
+        // Reset the commitment to be equal to the commitmentted `expiration` attribute.
+        // TODO: Find a more elegant way to handle this. Possibly the commits should not be
+        // included in the rkvc Bulletproof struct, and instead provided separately.
+        *bulletproof.bulletproof_commits.expiration_mut() =
+            Some(PedersonCommitment::commit_with_blind(&expiration, expiration_blind).compress());
 
         Ok(CredentialPresentation {
             presentation,
@@ -130,14 +124,15 @@ impl Issuer {
         // Subtract the current timestamp `at` from the commitmentted value. The result will only
         // be in the u64 range if it is greater than or equal to `at`.
         let mut bulletproof = pres.bulletproof.clone();
-        let mut expiration_commit = bulletproof
+        let expiration_commit = bulletproof
             .bulletproof_commits
             .expiration()
-            .unwrap()
+            .as_ref()
+            .context("no expiration commitment in presentation")?
             .decompress()
             .context("failed to decompress expiration commit")?;
-        expiration_commit -= RISTRETTO_BASEPOINT_TABLE.mul(&Scalar::from(at));
-        *bulletproof.bulletproof_commits.expiration_mut() = Some(expiration_commit.compress());
+        *bulletproof.bulletproof_commits.expiration_mut() =
+            Some((expiration_commit - Scalar::from(at)).compress());
 
         bulletproof.verify_range_proof(&mut transcript)?;
         Ok(())

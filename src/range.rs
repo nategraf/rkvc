@@ -15,7 +15,7 @@ use typenum::{Double, Unsigned};
 
 use crate::{
     attributes::{AttributeArray, AttributeCount, Attributes, Encoder, EncoderOutput},
-    pederson::PedersonCommitment,
+    pederson::{PedersonCommitment, PedersonGenerators},
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, ProofError,
         Prover, SchnorrCS, Transcript, Verifier,
@@ -102,8 +102,8 @@ pub struct Bulletproof<Msg: AttributeCount> {
     ///
     /// Attributes of the native field type do not need a range check commitment, and so the
     /// respective index in this array will be populated with `None`.
-    pub bulletproof_commits: AttributeArray<Option<CompressedRistretto>, Msg>,
-    _phantom_msg: PhantomData<Msg>,
+    pub bulletproof_commits:
+        AttributeArray<Option<PedersonCommitment<CompressedRistretto, RistrettoScalar>>, Msg>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -181,29 +181,21 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
             )
             .unwrap();
         commit.prove_opening_constraints(&mut prover, &attribute_vars, blind);
-        let (bulletproof_commits, bulletproof_openings) =
+        let bulletproof_openings =
             Self::prove_range_commit_constaints(&mut prover, &attribute_vars, msg)?;
 
         // NOTE: Uses rand::thread_rng internally, in conmbination with witness data.
         let schnorr_proof = prover.prove_compact();
-        let bulletproof =
-            Self::prove_bulletproof(&mut transcript, &bulletproof_commits, &bulletproof_openings)?;
+        let bulletproof = Self::prove_bulletproof(&mut transcript, &bulletproof_openings)?;
 
         Ok((bulletproof, schnorr_proof))
     }
 
-    #[allow(clippy::type_complexity)] // TODO: address this warning
     pub fn prove_range_commit_constaints<X>(
         prover: &mut Prover,
         attribute_vars: &Array<X, Msg::N>,
         msg: &Msg,
-    ) -> Result<
-        (
-            AttributeArray<Option<RistrettoPoint>, Msg>,
-            AttributeArray<Option<(RistrettoScalar, RistrettoScalar)>, Msg>,
-        ),
-        ProveError,
-    >
+    ) -> Result<AttributeArray<Option<(RistrettoScalar, RistrettoScalar)>, Msg>, ProveError>
     where
         Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
         // NOTE: The second and later bounds on Prover as AllocScalarVar is required, but it's
@@ -217,19 +209,20 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     {
         // Seperate generators are used to commit to the individual range-check values because all
         // values in a batched range check must be committed to using the same generators.
-        let bulletproof_commit_gens = bulletproofs::PedersenGens::default();
+        let bulletproof_commit_gens =
+            PedersonGenerators::<RistrettoPoint, RistrettoScalar>::default();
 
         // Allocate variables for the linking of the commitment opening to the range proof.
-        let bulletproof_commit_b_var = prover
+        let bulletproof_commit_gen_var = prover
             .alloc_point((
-                "rkvc::range::PoK::bulletproof_commit_b",
-                bulletproof_commit_gens.B,
+                "rkvc::range::PoK::bulletproof_commit_gen",
+                bulletproof_commit_gens.1[0],
             ))
             .unwrap();
-        let bulletproof_commit_b_blind_var = prover
+        let bulletproof_commit_gen_blind_var = prover
             .alloc_point((
-                "rkvc::range::PoK::bulletproof_commit_b",
-                bulletproof_commit_gens.B_blinding,
+                "rkvc::range::PoK::bulletproof_commit_gen_blind",
+                bulletproof_commit_gens.0,
             ))
             .unwrap();
 
@@ -252,9 +245,11 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
                 })
             })
             .collect();
-        let commits: AttributeArray<Option<RistrettoPoint>, Msg> = openings
+        let commits: AttributeArray<Option<PedersonCommitment<_, _>>, Msg> = openings
             .iter()
-            .map(|opening| opening.map(|(x, blind)| bulletproof_commit_gens.commit(x, blind)))
+            .map(|opening| {
+                opening.map(|(x, blind)| bulletproof_commit_gens.commit_with_blind(&x, blind))
+            })
             .collect();
 
         // Populate the constraints proving knowledge of an opening for the bulletproof value
@@ -271,17 +266,16 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
                 // commitment used by the range proof.
                 // TODO: Use a distinct label here for the allocate_scalar call.
                 let mut constraint = Constraint::<Prover>::new();
-                constraint.add(prover, *x_var, bulletproof_commit_b_var)?;
-                constraint.add(prover, (label, blind), bulletproof_commit_b_blind_var)?;
-                constraint.eq(prover, (label, *x_commit))?;
+                constraint.add(prover, *x_var, bulletproof_commit_gen_var)?;
+                constraint.add(prover, (label, blind), bulletproof_commit_gen_blind_var)?;
+                constraint.eq(prover, (label, x_commit.elem))?;
             };
         }
-        Ok((commits, openings))
+        Ok(openings)
     }
 
     pub fn prove_bulletproof(
         transcript: &mut Transcript,
-        commits: &Array<Option<RistrettoPoint>, Msg::N>,
         openings: &Array<Option<(RistrettoScalar, RistrettoScalar)>, Msg::N>,
     ) -> Result<Self, ProveError>
     where
@@ -289,8 +283,21 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         Msg::N: Shl<typenum::B1>,
         Double<Msg::N>: ArraySize,
     {
-        let commits_compressed: AttributeArray<Option<CompressedRistretto>, Msg> =
-            commits.iter().map(|c| c.map(|c| c.compress())).collect();
+        // Recompute the commits from the openings.
+        // NOTE: This could be more efficient by passing the commitments calculated earlier, but
+        // recomputing results in a cleaner interface. There is likely some way to improve this.
+        let bulletproof_commit_gens =
+            PedersonGenerators::<RistrettoPoint, RistrettoScalar>::default();
+        let commits: AttributeArray<Option<PedersonCommitment<_, _>>, Msg> = openings
+            .iter()
+            .map(|opening| {
+                opening.map(|(x, blind)| {
+                    bulletproof_commit_gens
+                        .commit_with_blind(&x, blind)
+                        .compress()
+                })
+            })
+            .collect();
 
         // Count the number of checks that we expect to apply. This is used to determine how much
         // padding is needed to get to the next power of two for Bulletproof batching.
@@ -301,8 +308,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         if check_count == 0 {
             return Ok(Bulletproof {
                 bulletproof: None,
-                bulletproof_commits: commits_compressed,
-                _phantom_msg: PhantomData,
+                bulletproof_commits: commits,
             });
         }
 
@@ -343,7 +349,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         // TODO: Constrain futher values such as u32.
         let (bulletproof, _) = bulletproofs::RangeProof::prove_multiple_with_rng(
             &BulletproofGens::new(bits_max as usize, x_values_u64.len()),
-            &Default::default(),
+            &bulletproof_commit_gens.into(),
             transcript,
             &x_values_u64.as_slice()[..check_count.next_power_of_two()],
             &bulletproof_blinds.as_slice()[..check_count.next_power_of_two()],
@@ -353,8 +359,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
 
         Ok(Self {
             bulletproof: Some(bulletproof),
-            bulletproof_commits: commits_compressed,
-            _phantom_msg: PhantomData,
+            bulletproof_commits: commits,
         })
     }
 
@@ -413,16 +418,17 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     {
         // Seperate generators are used to commit to the individual range-check values because all
         // values in a batched range check must be committed to using the same generators.
-        let bulletproof_commit_gens = bulletproofs::PedersenGens::default();
+        let bulletproof_commit_gens =
+            PedersonGenerators::<RistrettoPoint, RistrettoScalar>::default();
 
         // Allocate variables for the linking of the commitment opening to the range proof.
-        let bulletproof_commit_b_var = verifier.alloc_point((
-            "rkvc::range::PoK::bulletproof_commit_b",
-            bulletproof_commit_gens.B,
+        let bulletproof_commit_gen_var = verifier.alloc_point((
+            "rkvc::range::PoK::bulletproof_commit_gen",
+            bulletproof_commit_gens.1[0],
         ))?;
-        let bulletproof_commit_b_blind_var = verifier.alloc_point((
-            "rkvc::range::PoK::bulletproof_commit_b",
-            bulletproof_commit_gens.B_blinding,
+        let bulletproof_commit_gen_blind_var = verifier.alloc_point((
+            "rkvc::range::PoK::bulletproof_commit_gen_blind",
+            bulletproof_commit_gens.0,
         ))?;
 
         // Determine the largest attribute type we need to range check. We will use that for our
@@ -449,11 +455,14 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
                 // Link the scalar used for the opening proof, to an opening proof for the Pederson
                 // commitment used by the range proof.
                 let mut constraint = Constraint::<Verifier>::new();
-                constraint.add(verifier, x_var, bulletproof_commit_b_var)?;
-                constraint.add(verifier, label, bulletproof_commit_b_blind_var)?;
+                constraint.add(verifier, x_var, bulletproof_commit_gen_var)?;
+                constraint.add(verifier, label, bulletproof_commit_gen_blind_var)?;
                 constraint.eq(
                     verifier,
-                    (label, x_commit.ok_or(VerifyError::MalformedProof)?),
+                    (
+                        label,
+                        x_commit.clone().ok_or(VerifyError::MalformedProof)?.elem,
+                    ),
                 )?;
             }
         }
@@ -488,7 +497,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         )
         .filter_map(|(bits, commit)| {
             bits.map(|_| match commit {
-                Some(commit) => Ok(*commit),
+                Some(commit) => Ok(commit.elem),
                 None => Err(VerifyError::MalformedProof),
             })
         })
@@ -504,7 +513,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
                 .ok_or(VerifyError::MalformedProof)?;
             bulletproof.verify_multiple_with_rng(
                 &BulletproofGens::new(bits_max as usize, self.bulletproof_commits.len()),
-                &Default::default(),
+                &PedersonGenerators::default().into(),
                 transcript,
                 &bulletproof_commits[..check_count.next_power_of_two()],
                 bits_max as usize,
@@ -512,6 +521,15 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
             )?;
         }
         Ok(())
+    }
+}
+
+impl From<PedersonGenerators<RistrettoPoint, RistrettoScalar>> for bulletproofs::PedersenGens {
+    fn from(value: PedersonGenerators<RistrettoPoint, RistrettoScalar>) -> Self {
+        Self {
+            B: value.1[0],
+            B_blinding: value.0,
+        }
     }
 }
 
