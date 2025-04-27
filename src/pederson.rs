@@ -451,6 +451,48 @@ impl<Msg> PedersonCommitment<CompressedRistretto, Msg> {
     }
 }
 
+impl<G, MsgLhs, MsgRhs> Add<PedersonCommitment<G, MsgRhs>> for PedersonCommitment<G, MsgLhs>
+where
+    G: Group,
+    MsgLhs: AttributeCount + Add<MsgRhs>,
+    MsgRhs: AttributeCount,
+{
+    type Output = PedersonCommitment<G, <MsgLhs as Add<MsgRhs>>::Output>;
+
+    /// Add two [PedersonCommitment] values, which homomorphically adds the committed messages.
+    ///
+    /// The result will be a commitment to the addition of the committed messages. It is not
+    /// guaranteed that there exists an opening for the added message unless every (set of) scalar
+    /// field element(s) is a valid message.
+    fn add(self, rhs: PedersonCommitment<G, MsgRhs>) -> Self::Output {
+        PedersonCommitment {
+            elem: self.elem + rhs.elem,
+            _phantom_msg: PhantomData,
+        }
+    }
+}
+
+impl<G, MsgLhs, MsgRhs> Sub<PedersonCommitment<G, MsgRhs>> for PedersonCommitment<G, MsgLhs>
+where
+    G: Group,
+    MsgLhs: AttributeCount + Sub<MsgRhs>,
+    MsgRhs: AttributeCount,
+{
+    type Output = PedersonCommitment<G, <MsgLhs as Sub<MsgRhs>>::Output>;
+
+    /// Subtract two [PedersonCommitment] values, which homomorphically subtracts the committed messages.
+    ///
+    /// The result will be a commitment to the subtraction of the committed messages. It is not
+    /// guaranteed that there exists an opening for the result unless every (set of) scalar field
+    /// element(s) is a valid message.
+    fn sub(self, rhs: PedersonCommitment<G, MsgRhs>) -> Self::Output {
+        PedersonCommitment {
+            elem: self.elem - rhs.elem,
+            _phantom_msg: PhantomData,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use curve25519_dalek::{RistrettoPoint, Scalar};

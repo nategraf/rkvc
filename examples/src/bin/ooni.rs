@@ -1,13 +1,14 @@
 use core::ops::Mul;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use blake2::Blake2b512;
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_TABLE, ristretto::CompressedRistretto, RistrettoPoint, Scalar,
 };
 use rkvc::{
     cmz::{Key, Mac, PublicParameters},
+    pederson::PedersonCommitment,
     range::Bulletproof,
     zkp::{Prover, Transcript, Verifier},
     Attributes, UintEncoder,
@@ -17,6 +18,7 @@ use rkvc::{
 struct OoniAttributes {
     /// A secret key held by the client for the purpose of deriving context-specific pseudonyms.
     /// This value is private during issuance, and used during presentation to derive pseudonyms.
+    #[rkvc(label = "OoniAttributes::pseudonym_key")]
     pub pseudonym_key: Scalar,
     /// An creation time for the credential. Public and chosen by the server during issuance, and
     /// private thereafter. The client must prove during presentation that there credential is at
@@ -28,6 +30,25 @@ struct OoniAttributes {
     /// A bit set to true if the client is a trusted party. Set by the server during presentation,
     /// and can be optionally revealed to bypass other predicate checks if true.
     pub is_trusted: bool,
+}
+
+/// Subset of [OoniAttributes] that are committed to as part of the issuance request.
+#[derive(Attributes, Clone, Debug)]
+struct OoniIssuanceAttributes {
+    /// See [OoniAttributes::pseudonym_key].
+    #[rkvc(label = "OoniAttributes::pseudonym_key")]
+    pub pseudonym_key: Scalar,
+}
+
+impl Add<OoniIssuanceAttributes> for OoniAttributes {
+    type Output = OoniAttributes;
+
+    fn add(self, rhs: OoniIssuanceAttributes) -> Self::Output {
+        OoniAttributes {
+            pseudonym_key: self.pseudonym_key + rhs.pseudonym_key,
+            ..self
+        }
+    }
 }
 
 struct Credential {
@@ -44,6 +65,7 @@ struct CredentialPresentation {
 impl Credential {
     /// Present the credential, with current time set to `at`, proving that the time since create
     /// is at least `min_age` and the number of measurements is at least `min_measurement_count`.
+    // TODO: Add a statement about the pseudonym.
     pub fn present(
         &self,
         pp: &PublicParameters<RistrettoPoint, OoniAttributes>,
@@ -78,8 +100,6 @@ impl Credential {
 
         // Subtract the committed creation timestamp from `at - min_age`. The result will only be
         // in the u64 range if it is less than `at - min_age`.
-        // TODO: This relies on fragile implementation details. Provide a more robust way to
-        // accomplish this.
         let max_timestamp = at.checked_sub(min_age).unwrap();
         let created_at_commit: RistrettoPoint = bulletproof_commits.created_at().unwrap();
         *bulletproof_commits.created_at_mut().as_mut().unwrap() = RISTRETTO_BASEPOINT_TABLE
@@ -137,15 +157,58 @@ impl Issuer {
         &self,
         at: u64,
         is_trusted: bool,
-        pseudonym_key_commit: CompressedRistretto,
-    ) -> Credential {
-        let attributes = OoniAttributes {};
-        let mac = self.key.mac(&attributes);
-        Credential { attributes, mac }
+        pseudonym_key_commit: PedersonCommitment<CompressedRistretto, OoniIssuanceAttributes>,
+    ) -> anyhow::Result<Credential> {
+        let attributes = OoniAttributes {
+            pseudonym_key: Scalar::ZERO,
+            is_trusted,
+            created_at: at,
+            measurement_count: 0,
+        };
+        let attributes_commit = PedersonCommitment::commit_with_blind(&attributes, Scalar::ZERO)
+            + pseudonym_key_commit
+                .decompress()
+                .context("decompress of pseudonym_key_commit failed")?;
+        let mac = self.key.blind_mac(&attributes_commit);
+        Ok(Credential { attributes, mac })
     }
 
-    pub fn verify_presentation(&self, _at: u64, _pres: &CredentialPresentation) -> Result<()> {
-        todo!()
+    pub fn verify_presentation(
+        &self,
+        at: u64,
+        min_age: u64,
+        pres: &CredentialPresentation,
+    ) -> Result<()> {
+        let mut transcript =
+            Transcript::new(b"rkvc_examples::ooni::Credential::present::transcript");
+        let mut verifier = Verifier::new(
+            b"rkvc_examples::ooni::Credential::present::constraints",
+            &mut transcript,
+        );
+
+        // Constrain the commitments used for the Pederson commitment within CMZ and the
+        // commitments used for the (batched) range proof to open to the same values.
+        let msg_variables = self
+            .key
+            .constrain_presentation(&mut verifier, &pres.presentation);
+        pres.bulletproof
+            .constrain_range_commit_opening(&mut verifier, &msg_variables)?;
+
+        verifier.verify_compact(&pres.schnorr_proof);
+
+        // Subtract the committed creation timestamp from `at - min_age`. The result will only be
+        // in the u64 range if it is less than `at - min_age`.
+        let max_timestamp = at.checked_sub(min_age).unwrap();
+        let mut bulletproof = pres.bulletproof.clone();
+        let mut created_at_commit = bulletproof
+            .bulletproof_commits
+            .created_at()
+            .unwrap()
+            .decompress()
+            .context("failed to decompress created_at commit")?;
+
+        bulletproof.verify_range_proof(&mut transcript)?;
+        Ok(())
     }
 
     pub fn public_parameters(&self) -> PublicParameters<RistrettoPoint, OoniAttributes> {
@@ -155,6 +218,8 @@ impl Issuer {
 
 // Walks through the mock flow of a client interacting with an issuer.
 fn main() -> Result<()> {
+    todo!()
+    /*
     let issuer = Issuer::new();
     let pp = issuer.public_parameters();
 
@@ -178,4 +243,5 @@ fn main() -> Result<()> {
     println!("Issuer verified the credential");
 
     Ok(())
+        */
 }
