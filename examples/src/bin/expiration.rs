@@ -6,6 +6,7 @@ use curve25519_dalek::{ristretto::CompressedRistretto, RistrettoPoint, Scalar};
 use rkvc::{
     cmz::{Key, Mac, PublicParameters},
     pederson::PedersonCommitment,
+    rand,
     range::Bulletproof,
     zkp::{Prover, Transcript, Verifier},
     Attributes, EncoderOutput, UintEncoder,
@@ -50,7 +51,7 @@ impl Credential {
             &mut prover,
             &UintEncoder::encode_attributes(&self.attributes).collect(),
             pp,
-            rkvc::rand::thread_rng(),
+            rand::thread_rng(),
         );
         let mut bulletproof_openings = Bulletproof::prove_range_commit_constaints(
             &mut prover,
@@ -90,7 +91,7 @@ struct Issuer {
 impl Issuer {
     pub fn new() -> Self {
         Self {
-            key: Key::gen(rkvc::rand::thread_rng()),
+            key: Key::gen(rand::thread_rng()),
         }
     }
 
@@ -156,8 +157,11 @@ fn main() -> Result<()> {
 
     // TODO: This flow is missing the ZKP from the issuer showing the credential was created
     // with the correct key.
-    let cred = issuer.issue("alice@dev.null", now_timestamp + 30);
+    let mut cred = issuer.issue("alice@dev.null", now_timestamp + 30);
     println!("Issued a credential with attributes: {:?}", cred.attributes);
+
+    // Client immediately rerandomizes the MAC on the credential they receive.
+    cred.mac.randomize(rand::thread_rng());
 
     // 15 seconds later, they present their credential.
     let later_timestamp = now_timestamp + 15;
