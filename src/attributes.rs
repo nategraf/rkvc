@@ -317,6 +317,21 @@ impl<T, A: AttributeCount + ?Sized> FromIterator<T> for AttributeArray<T, A> {
     }
 }
 
+impl<T, A: AttributeCount + ?Sized> From<Array<T, A::N>> for AttributeArray<T, A> {
+    fn from(value: Array<T, A::N>) -> Self {
+        Self(value)
+    }
+}
+
+impl<T, A: AttributeCount + ?Sized, const N: usize> From<[T; N]> for AttributeArray<T, A>
+where
+    A::N: ArraySize<ArrayType<T> = [T; N]>,
+{
+    fn from(value: [T; N]) -> Self {
+        Self(value.into())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use core::ops::Deref;

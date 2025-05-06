@@ -323,6 +323,16 @@ impl<Msg: AttributeCount> PedersonGenerators<CompressedRistretto, Msg> {
     }
 }
 
+impl<G, Msg> PedersonCommitment<G, Msg> {
+    /// Construct a [PedersonCommitment] directly from an group element.
+    pub fn from_elem(elem: G) -> Self {
+        Self {
+            elem,
+            _phantom_msg: PhantomData,
+        }
+    }
+}
+
 impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     pub fn commit_with_blind(msg: &Msg, blind: RistrettoScalar) -> Self
     where
