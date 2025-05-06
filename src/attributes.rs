@@ -295,9 +295,9 @@ impl<T: Clone> Encoder<&T> for IdentityEncoder<T> {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct AttributeArray<T, A: AttributeCount>(pub Array<T, A::N>);
+pub struct AttributeArray<T, A: AttributeCount + ?Sized>(pub Array<T, A::N>);
 
-impl<T, A: AttributeCount> Deref for AttributeArray<T, A> {
+impl<T, A: AttributeCount + ?Sized> Deref for AttributeArray<T, A> {
     type Target = Array<T, A::N>;
 
     fn deref(&self) -> &Self::Target {
@@ -305,13 +305,13 @@ impl<T, A: AttributeCount> Deref for AttributeArray<T, A> {
     }
 }
 
-impl<T, A: AttributeCount> DerefMut for AttributeArray<T, A> {
+impl<T, A: AttributeCount + ?Sized> DerefMut for AttributeArray<T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<T, A: AttributeCount> FromIterator<T> for AttributeArray<T, A> {
+impl<T, A: AttributeCount + ?Sized> FromIterator<T> for AttributeArray<T, A> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self(iter.into_iter().collect())
     }
