@@ -571,7 +571,7 @@ mod test {
         let (commit, blind) = pp
             .clone()
             .into_pederson()
-            .commit(&example, &mut rand::thread_rng());
+            .commit(&example, rand::thread_rng());
         let mut mac = key.blind_mac(&commit);
         mac.remove_blind(blind);
         mac.randomize(&mut rand::thread_rng());
@@ -597,7 +597,7 @@ mod test {
         let (commit, blind) = pp
             .clone()
             .into_pederson()
-            .commit(&example, &mut rand::thread_rng());
+            .commit(&example, rand::thread_rng());
         let mut mac = key.blind_mac(&commit);
         mac.remove_blind(blind);
         mac.randomize(&mut rand::thread_rng());
