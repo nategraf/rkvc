@@ -51,6 +51,8 @@ where
 {
     pub u: G,
     pub commit_v: G,
+    /// An array of Pederson commitments to the attributes using the generators U and the basepoint
+    /// of the group.
     pub commit_msg: AttributeArray<G, Msg>,
 }
 

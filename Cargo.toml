@@ -43,7 +43,7 @@ zeroize = { version = "1.8.1", default-features = false }
 rkvc-derive = { workspace = true }
 
 [profile.dev]
-# Makes tests run much faster at the cost of slightly longer builds.
+# Makes tests run much faster at the cost of slightly longer builds and worse debug info.
 opt-level = 1
 
 [features]
