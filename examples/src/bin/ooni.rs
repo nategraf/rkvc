@@ -399,6 +399,14 @@ impl Issuer {
 
 // Walks through the mock flow of a client interacting with an issuer.
 fn main() -> Result<()> {
+    // Initialize tracing subscriber (using RUST_LOG env var, default to info level)
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let issuer = Issuer::new();
     let pp = issuer.public_parameters();
 
@@ -406,6 +414,8 @@ fn main() -> Result<()> {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
+
+    tracing::info!("Running example OONI flow with starting timestamp {now_timestamp}");
 
     // Client picks pseudonym_key to construct the issuance attributes.
     let issuance_attr = OoniIssuanceAttributes {
@@ -420,6 +430,8 @@ fn main() -> Result<()> {
     let issuance_opening_proof =
         issuance_pederson_gens.prove_opening(&issuance_attr_commit, &issuance_attr, issance_blind);
 
+    tracing::info!("Client sending issuance request with attributes: {issuance_attr:?}");
+
     // Client sends their issuance attributes commitment to the issuer, and the issuer creates a
     // credential with the created_at time set to now_timestamp.
     let mut issuance_response = issuer.issue(
@@ -429,25 +441,47 @@ fn main() -> Result<()> {
         &issuance_opening_proof,
     )?;
 
+    tracing::info!("Issuer responded to initial issuance request");
+
     // Add the issuance_attr (i.e. the pseudonym_key) into the returned credential to finalize.
     let credential = issuance_response.finalize(issuance_attr, issance_blind)?;
 
-    // Time passes ⌚
+    tracing::info!(
+        "Client finalized credential with attributes: {:?}",
+        credential.attributes
+    );
+
+    tracing::info!("Time passes ⌚ +15s");
     now_timestamp += 15;
 
+    tracing::info!("Client requesting updated measurement count");
     let (req, blind) = credential.request_increment_measurement_count(&pp);
     let resp = issuer.increment_measurement_count(&req)?;
     let credential = resp.finalize(&pp, credential, blind)?;
+    tracing::info!(
+        "Client received new credential with updated measurement_count: {:?}",
+        credential.attributes
+    );
 
+    tracing::info!("Time passes ⌚ +15s");
+    now_timestamp += 15;
+
+    tracing::info!("Client requesting updated measurement count");
     let (req, blind) = credential.request_increment_measurement_count(&pp);
     let resp = issuer.increment_measurement_count(&req)?;
     let credential = resp.finalize(&pp, credential, blind)?;
+    tracing::info!(
+        "Client received new credential with updated measurement_count: {:?}",
+        credential.attributes
+    );
 
-    // Time passes ⌚
+    tracing::info!("Time passes ⌚ +15s");
     now_timestamp += 15;
 
-    let presentation = credential.present_auth(&pp, now_timestamp, 20, 1)?;
-    issuer.verify_auth_presentation(now_timestamp, 20, 1, &presentation)?;
+    tracing::info!("Client authenticating with min_age = 30s and min_measurement_count = 1");
+    let presentation = credential.present_auth(&pp, now_timestamp, 30, 1)?;
+    issuer.verify_auth_presentation(now_timestamp, 30, 1, &presentation)?;
+    tracing::info!("Success ✅");
 
     Ok(())
 }
