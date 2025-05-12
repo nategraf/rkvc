@@ -122,10 +122,11 @@ impl Credential {
 
         // Subtract the committed creation timestamp from `at - min_age`. The result will only be
         // in the u64 range if it is less than `at - min_age`.
+        // NOTE: Blind is negated because the homorphic operation is to subtract the commit.
         let max_timestamp = at.checked_sub(min_age).unwrap();
         let (created_at, created_at_blind) = bulletproof_openings.created_at().unwrap();
         *bulletproof_openings.created_at_mut() =
-            Some((Scalar::from(max_timestamp) - created_at, created_at_blind));
+            Some((Scalar::from(max_timestamp) - created_at, -created_at_blind));
 
         // Prove that the measurement count is at least min_measurement_count.
         let (measurement_count, measurement_count_blind) =
@@ -343,7 +344,9 @@ impl Issuer {
         *bulletproof.bulletproof_commits.measurement_count_mut() =
             Some((measurement_count_commit - Scalar::from(min_measurement_count)).compress());
 
-        bulletproof.verify_range_proof(&mut transcript)?;
+        bulletproof
+            .verify_range_proof(&mut transcript)
+            .context("verification of range proof failed")?;
         Ok(())
     }
 
@@ -478,9 +481,17 @@ fn main() -> Result<()> {
     tracing::info!("Time passes ⌚ +15s");
     now_timestamp += 15;
 
-    tracing::info!("Client authenticating with min_age = 30s and min_measurement_count = 1");
-    let presentation = credential.present_auth(&pp, now_timestamp, 30, 1)?;
-    issuer.verify_auth_presentation(now_timestamp, 30, 1, &presentation)?;
+    let min_age = 30u64;
+    let min_measurement_count = 1u64;
+    tracing::info!("Client authenticating with min_age = {min_age}s and min_measurement_count = {min_measurement_count}");
+    let presentation =
+        credential.present_auth(&pp, now_timestamp, min_age, min_measurement_count)?;
+    issuer.verify_auth_presentation(
+        now_timestamp,
+        min_age,
+        min_measurement_count,
+        &presentation,
+    )?;
     tracing::info!("Success ✅");
 
     Ok(())
