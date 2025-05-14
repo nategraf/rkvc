@@ -49,7 +49,9 @@ pub struct Presentation<G, Msg: AttributeCount>
 where
     Msg: AttributeCount,
 {
+    /// The value U from the MAC. Note that the U value is randomized by the client upon receipt.
     pub u: G,
+    /// Hiding commitment to the point V from the MAC.
     pub commit_v: G,
     /// An array of Pederson commitments to the attributes using the generators U and the basepoint
     /// of the group.
