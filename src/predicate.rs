@@ -158,8 +158,12 @@ impl Prover {
         PointVar(self.points.len() - 1, Scalar::ONE)
     }
 
-    fn scalars_val(&self, var: impl Into<Option<ScalarVar>>) -> Scalar {
+    fn scalar_val(&self, var: impl Into<Option<ScalarVar>>) -> Scalar {
         var.into().map_or(Scalar::ONE, |var| self.scalars[var.0])
+    }
+
+    fn point_val(&self, var: PointVar) -> Option<RistrettoPoint> {
+        self.points[var.0].map(|point| point * var.1)
     }
 
     /// Assign a point that is unassigned, but determined by a linear combination.
@@ -190,18 +194,18 @@ impl Prover {
                 self.points[point_var.0].map(|p| (scalar_var, point_var.1, p))
             })
             .map(|(scalar_var, point_multiplier, point_val)| {
-                self.scalars_val(*scalar_var) * point_multiplier * point_val
+                self.scalar_val(*scalar_var) * point_multiplier * point_val
             })
             .sum();
 
         // FIXME: Invert here is dangerous / potentiall incorrect without zero check.
         self.points[unassigned_point_var.0] =
-            Some(point * (self.scalars_val(*scalar_var) * unassigned_point_var.1).invert());
+            Some(point * (self.scalar_val(*scalar_var) * unassigned_point_var.1).invert());
 
         Ok(())
     }
 
-    fn prove(mut self) -> Result<(), &'static str> {
+    fn prove(&mut self) -> Result<(), &'static str> {
         // TODO: At least sort from least to most unassigned.
         for linear_combination in core::mem::take(&mut self.constraints).iter() {
             self.assign_constrained_point(linear_combination)?;
@@ -228,7 +232,7 @@ impl Verifier {
         PointVar(self.points.len() - 1, Scalar::ONE)
     }
 
-    fn verify(self, proof: ()) -> Result<(), Infallible> {
+    fn verify(&self, proof: ()) -> Result<(), Infallible> {
         let () = proof;
         Ok(())
     }
@@ -270,26 +274,34 @@ mod tests {
         x: ScalarVar,
         dl_pairs: [(PointVar, PointVar); 2],
     ) {
-        for (a, b) in dl_pairs {
-            cs.constrain_eq(a, x * b);
-        }
+        let [(a, g), (b, h)] = dl_pairs;
+        cs.constrain_eq(a, x * g);
+        cs.constrain_eq(b, x * h);
     }
 
     fn example() {
         let g = RistrettoPoint::random(&mut rand::thread_rng());
         let h = RistrettoPoint::random(&mut rand::thread_rng());
 
-        let proof = {
+        let (proof, a, b) = {
             let scalar = Scalar::random(&mut rand::thread_rng());
 
             let mut prover = Prover::default();
             let scalar_var = prover.alloc_scalar(scalar);
             let dl_pair_vars = [
                 (prover.alloc_point(None), prover.alloc_point(g)),
-                (prover.alloc_point(None), prover.alloc_point(g)),
+                (prover.alloc_point(None), prover.alloc_point(h)),
             ];
+
             example_statement(&mut prover, scalar_var, dl_pair_vars);
-            prover.prove().unwrap()
+
+            let proof = prover.prove().unwrap();
+
+            // Get the values assigned for a and b during proving.
+            let a = prover.point_val(dl_pair_vars[0].0).unwrap();
+            let b = prover.point_val(dl_pair_vars[1].0).unwrap();
+
+            (proof, a, b)
         };
 
         let mut verifier = Verifier::default();
