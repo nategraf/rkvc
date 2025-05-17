@@ -52,6 +52,7 @@ use core::{
 };
 
 use ff::Field;
+use group::Group;
 
 // Alias type for a string that can either be static, or allocated at runtime and owned.
 type Label = Cow<'static, str>;
@@ -109,6 +110,18 @@ impl From<Term> for LinearCombination {
     }
 }
 
+impl From<Vec<Term>> for LinearCombination {
+    fn from(terms: Vec<Term>) -> Self {
+        Self(terms)
+    }
+}
+
+impl FromIterator<Term> for LinearCombination {
+    fn from_iter<T: IntoIterator<Item = Term>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
 impl From<PointVar> for LinearCombination {
     fn from(var: PointVar) -> Self {
         Self(vec![var.into()])
@@ -121,6 +134,10 @@ struct Relation {
     points: Vec<Option<RistrettoPoint>>,
     constraints: Vec<LinearCombination>,
 }
+
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+struct Proof {}
 
 // NOTE: By providing two methods for allocating a point variable, one which must be assigned, and
 // the other than must be equal to a linear combination of point variables, we can ensure by
@@ -163,6 +180,10 @@ impl Relation {
         point_var
     }
 
+    // TODO: Does it make sense to have this here versus making this some kind of intermediate step
+    // towards making an Instance? The idea with this function is that only the verifier would call
+    // it, as the prover instead provides a Witness, and the unassigned points get calculated from
+    // that.
     pub fn assign_point(&mut self, var: PointVar, value: RistrettoPoint) {
         match self.points[var.0] {
             Some(assignment) => {
@@ -174,15 +195,114 @@ impl Relation {
             None => self.points[var.0] = Some(value),
         }
     }
+
+    /// Convert the [Relation] into an [Instance], checking that all point variables are assigned.
+    pub fn into_instance(self) -> Result<Instance, Error> {
+        let points = self
+            .points
+            .into_iter()
+            .enumerate()
+            .map(|(i, point)| point.ok_or(Error::UnassignedPoint(i)))
+            .collect::<Result<_, _>>()?;
+
+        Ok(Instance {
+            points,
+            scalar_count: self.scalar_count,
+            constraints: self.constraints,
+        })
+    }
+
+    pub fn prove(mut self, witness: Witness) -> Result<Proof, Error> {
+        // TODO: Its possible that we could enforce this at compile-time instead.
+        if witness.0.len() != self.scalar_count {
+            return Err(Error::InvalidWitnessLength {
+                expected: self.scalar_count,
+                received: witness.0.len(),
+            });
+        }
+
+        // Solve for the unassigned point variables.
+        // NOTE: In the current implementation, we make utilize an invariant created by the
+        // construction of `alloc_point` and `alloc_eq`, such that all points are "determined".
+        // *) Assigned points are determined. Any point that is constrained to be equal to a linear
+        // combination of determined points is determined.
+        // A) In a new relation, there are no point variables. As a result, all point variables are
+        // trivially determined.
+        // B) When calling `alloc_point`, the point is assigned and therefore determined. If all
+        // points in the relation are determined before the call to `alloc_point`, all points
+        // including the new point variable are determined after.
+        // C) When calling `alloc_point`, a single new unassigned point is created. It is set equal
+        // to a linear combination of previously created points in the relation. Therefore if all
+        // points were determined before the call to `alloc_eq`, they will be after.
+        //
+        // Additionally, we are able to resolve the point variables by looping through the
+        // constraints in the order that they are listed. Each constraint can introduce at most one
+        // unassigned point variable, which must be determined by the previously allocated point
+        // variables.
+        for constraint in self.constraints {
+            // Split the constraints into those with assigned and unassigned points.
+            let (unassigned_points, assigned_terms) = constraint
+                .0
+                .iter()
+                .map(|term| match self.points[term.point.0] {
+                    None => {
+                        // alloc_eq should only create terms with weight of one and no scalar var.
+                        assert_eq!(
+                            term.weight,
+                            Scalar::ONE,
+                            "invariant check failed: non-unit weight"
+                        );
+                        assert!(
+                            term.scalar.is_none(),
+                            "invariant check failed: scalar var is not none"
+                        );
+                        (Some(term.point), None)
+                    }
+                    Some(_) => (None, Some(term)),
+                })
+                .collect::<(Vec<_>, Vec<_>)>();
+
+            // Extract the one unassigned point from the vector.
+            let unassigned_points = unassigned_points.into_iter().flatten().collect::<Vec<_>>();
+            if unassigned_points.len() > 1 {
+                unreachable!("oh no");
+            }
+            let unassigned_point = unassigned_points[0];
+
+            // Evaluate the terms with assigned points to determine the unassigned point.
+            self.points[unassigned_point.0] = assigned_terms
+                .into_iter()
+                .flatten()
+                .fold(RistrettoPoint::identity(), |value, term| {
+                    value
+                        + (term.scalar.map(|s| witness.0[s.0]).unwrap_or(Scalar::ONE) * term.weight)
+                            * self.points[term.point.0].unwrap()
+                })
+                .neg()
+                .into();
+        }
+
+        todo!()
+    }
 }
 
 struct Instance {
     scalar_count: usize,
     points: Vec<RistrettoPoint>,
+    // NOTE: Instead of a LinearCombination, which allows for a weight to be applied to each term,
+    // this could simply be Vec<Vec<(ScalarVar, G)>> which would allow dropping the points vec.
     constraints: Vec<LinearCombination>,
 }
 
 struct Witness(Vec<Scalar>);
+
+#[derive(Clone, Debug, thiserror::Error)]
+enum Error {
+    #[error("point variable with index {0} is unassigned")]
+    UnassignedPoint(usize),
+    #[error("witness length of {received} does not match the expected length for the relation, {expected}")]
+    InvalidWitnessLength { expected: usize, received: usize },
+}
 
 // Relation - contains public points and constants, along with variable points.
 //  - Has functions to allocate scalars.
