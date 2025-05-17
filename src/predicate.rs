@@ -239,50 +239,58 @@ impl Relation {
         // constraints in the order that they are listed. Each constraint can introduce at most one
         // unassigned point variable, which must be determined by the previously allocated point
         // variables.
-        for constraint in self.constraints {
+        for constraint in self.constraints.iter() {
             // Split the constraints into those with assigned and unassigned points.
-            let (unassigned_points, assigned_terms) = constraint
+            let unassigned_points = constraint
                 .0
                 .iter()
-                .map(|term| match self.points[term.point.0] {
-                    None => {
-                        // alloc_eq should only create terms with weight of one and no scalar var.
-                        assert_eq!(
-                            term.weight,
-                            Scalar::ONE,
-                            "invariant check failed: non-unit weight"
-                        );
-                        assert!(
-                            term.scalar.is_none(),
-                            "invariant check failed: scalar var is not none"
-                        );
-                        (Some(term.point), None)
-                    }
-                    Some(_) => (None, Some(term)),
+                .filter(|term| self.points[term.point.0].is_none())
+                .map(|term| {
+                    // alloc_eq should only create terms with weight of one and no scalar var.
+                    assert_eq!(
+                        term.weight,
+                        Scalar::ONE,
+                        "invariant check failed: non-unit weight"
+                    );
+                    assert!(
+                        term.scalar.is_none(),
+                        "invariant check failed: scalar var is not none"
+                    );
+                    term.point
                 })
-                .collect::<(Vec<_>, Vec<_>)>();
+                .collect::<Vec<_>>();
 
             // Extract the one unassigned point from the vector.
-            let unassigned_points = unassigned_points.into_iter().flatten().collect::<Vec<_>>();
+            if unassigned_points.len() == 0 {
+                continue;
+            }
             if unassigned_points.len() > 1 {
                 unreachable!("oh no");
             }
             let unassigned_point = unassigned_points[0];
 
             // Evaluate the terms with assigned points to determine the unassigned point.
-            self.points[unassigned_point.0] = assigned_terms
-                .into_iter()
-                .flatten()
-                .fold(RistrettoPoint::identity(), |value, term| {
-                    value
-                        + (term.scalar.map(|s| witness.0[s.0]).unwrap_or(Scalar::ONE) * term.weight)
-                            * self.points[term.point.0].unwrap()
+            self.points[unassigned_point.0] = constraint
+                .0
+                .iter()
+                .filter_map(|term| {
+                    self.points[term.point.0].map(|point| (term.scalar, term.weight, point))
                 })
+                .fold(
+                    RistrettoPoint::identity(),
+                    |value, (scalar_var, weight, point)| {
+                        value
+                            + (scalar_var.map(|s| witness.0[s.0]).unwrap_or(Scalar::ONE) * weight)
+                                * point
+                    },
+                )
                 .neg()
                 .into();
         }
 
-        todo!()
+        self.into_instance()
+            .expect("all points should be assigned")
+            .prove(witness)
     }
 }
 
@@ -292,6 +300,10 @@ struct Instance {
     // NOTE: Instead of a LinearCombination, which allows for a weight to be applied to each term,
     // this could simply be Vec<Vec<(ScalarVar, G)>> which would allow dropping the points vec.
     constraints: Vec<LinearCombination>,
+}
+
+impl Instance {
+    pub fn prove(mut self, witness: Witness) -> Result<Proof, Error> {}
 }
 
 struct Witness(Vec<Scalar>);
