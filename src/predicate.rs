@@ -58,212 +58,145 @@ type Label = Cow<'static, str>;
 
 use curve25519_dalek::{RistrettoPoint, Scalar};
 
+/// Implementations of core ops for the predicate types.
+mod ops;
+
 // NOTE: A var can be created with one constraint system struct and then passed to another, which
 // could have strange results. It may be possible to use the trick from GhostCell to bind a var to
 // a particular constraint system.
 // https://docs.rs/ghost-cell/latest/src/ghost_cell/ghost_cell.rs.html#533
 
-#[derive(Copy, Clone, Debug, Hash)]
+#[derive(Copy, Clone, Debug)]
 struct ScalarVar(usize);
 
-#[derive(Copy, Clone, Debug, Hash)]
-struct PointVar(usize, Scalar);
+#[derive(Copy, Clone, Debug)]
+struct PointVar(usize);
+
+#[derive(Copy, Clone, Debug)]
+struct Term {
+    /// A scalar in the linear combination that is part of the witness (i.e. it is secret to the
+    /// prover). If `None`, this indicates that the term does not have an associated secret and
+    /// this term only a public point.
+    scalar: Option<ScalarVar>,
+    /// A point in the linear combination that is part of the instance.
+    point: PointVar,
+    /// A constant multiplicative factor applied to the term.
+    ///
+    /// In a relation, this is a public constant that is part of the relation's definition. When
+    /// constructing a witness of the relation, it is folded into the point value which is known at
+    /// that time.
+    weight: Scalar,
+}
 
 /// A linear combination of scalar variables (private the prover) and point variables (known to
 /// both parties). If the scalar variable is `None`, it is equivalent to the known constant 1.
-struct LinearCombination(Vec<(Option<ScalarVar>, PointVar)>);
+#[derive(Clone, Debug, Default)]
+struct LinearCombination(Vec<Term>);
+
+impl From<PointVar> for Term {
+    fn from(var: PointVar) -> Self {
+        Self {
+            scalar: None,
+            point: var,
+            weight: Scalar::ONE,
+        }
+    }
+}
+
+impl From<Term> for LinearCombination {
+    fn from(term: Term) -> Self {
+        Self(vec![term])
+    }
+}
 
 impl From<PointVar> for LinearCombination {
-    fn from(value: PointVar) -> Self {
-        Self(vec![(None, value)])
+    fn from(var: PointVar) -> Self {
+        Self(vec![var.into()])
     }
 }
 
-impl Add<LinearCombination> for LinearCombination {
-    type Output = Self;
-
-    fn add(mut self, mut rhs: LinearCombination) -> Self {
-        self.0.append(&mut rhs.0);
-        self
-    }
-}
-
-impl Sub<LinearCombination> for LinearCombination {
-    type Output = Self;
-
-    fn sub(mut self, mut rhs: LinearCombination) -> Self {
-        // Negate the coefficient for each of the point vars on the RHS.
-        for (_, point_var) in rhs.0.iter_mut() {
-            point_var.1 = -point_var.1;
-        }
-        self.0.append(&mut rhs.0);
-        self
-    }
-}
-
-impl Mul<Scalar> for LinearCombination {
-    type Output = Self;
-
-    fn mul(mut self, rhs: Scalar) -> Self {
-        for (_, point_var) in self.0.iter_mut() {
-            point_var.1 *= rhs;
-        }
-        self
-    }
-}
-
-impl Mul<LinearCombination> for Scalar {
-    type Output = LinearCombination;
-
-    fn mul(self, mut rhs: LinearCombination) -> LinearCombination {
-        for (_, point_var) in rhs.0.iter_mut() {
-            point_var.1 *= self;
-        }
-        rhs
-    }
-}
-
-impl Mul<ScalarVar> for PointVar {
-    type Output = LinearCombination;
-
-    fn mul(self, rhs: ScalarVar) -> LinearCombination {
-        LinearCombination(vec![(Some(rhs), self)])
-    }
-}
-
-impl Mul<PointVar> for ScalarVar {
-    type Output = LinearCombination;
-
-    fn mul(self, rhs: PointVar) -> LinearCombination {
-        LinearCombination(vec![(Some(self), rhs)])
-    }
-}
-
-#[derive(Default)]
-struct Prover {
-    scalars: Vec<Scalar>,
-    /// A points may be `None` if it is an unknown to be resolved in the linear constraint system.
+#[derive(Clone, Debug, Default)]
+struct Relation {
+    scalar_count: usize,
     points: Vec<Option<RistrettoPoint>>,
     constraints: Vec<LinearCombination>,
 }
 
-impl Prover {
-    pub fn alloc_scalar(&mut self, witness: Scalar) -> ScalarVar {
-        self.scalars.push(witness);
-        ScalarVar(self.scalars.len() - 1)
+// NOTE: By providing two methods for allocating a point variable, one which must be assigned, and
+// the other than must be equal to a linear combination of point variables, we can ensure by
+// construction that all unassigned point variables can be computed given the witness.
+impl Relation {
+    pub fn alloc_scalar(&mut self) -> ScalarVar {
+        self.scalar_count += 1;
+        ScalarVar(self.scalar_count - 1)
     }
 
-    pub fn alloc_point(&mut self, point: impl Into<Option<RistrettoPoint>>) -> PointVar {
-        self.points.push(point.into());
-        PointVar(self.points.len() - 1, Scalar::ONE)
+    pub fn alloc_point(&mut self, point: RistrettoPoint) -> PointVar {
+        self.points.push(Some(point));
+        PointVar(self.points.len() - 1)
     }
 
-    fn scalar_val(&self, var: impl Into<Option<ScalarVar>>) -> Scalar {
-        var.into().map_or(Scalar::ONE, |var| self.scalars[var.0])
+    pub fn constrain_zero(&mut self, linear_combination: impl Into<LinearCombination>) {
+        // NOTE: It would be possible here for the caller to pass a linear_combination that has no
+        // scalar variables, and is known to be non-zero. It might be good to panic if that
+        // happens.
+        self.constraints.push(linear_combination.into());
     }
 
-    fn point_val(&self, var: PointVar) -> Option<RistrettoPoint> {
-        self.points[var.0].map(|point| point * var.1)
-    }
-
-    /// Assign a point that is unassigned, but determined by a linear combination.
-    // TODO: This is a pretty clunky way to address this.
-    fn assign_constrained_point(
-        &mut self,
-        linear_combination: &LinearCombination,
-    ) -> Result<(), &'static str> {
-        let unassigned = linear_combination
-            .0
-            .iter()
-            .filter(|(_, point_var)| self.points[point_var.0].is_none())
-            .collect::<Vec<_>>();
-
-        if unassigned.is_empty() {
-            return Ok(());
-        }
-        if unassigned.len() > 1 {
-            return Err("too many unassigned points");
-        }
-        let (scalar_var, unassigned_point_var) = unassigned[0];
-
-        // Calculate the linear combination of the assigned points.
-        let point: RistrettoPoint = linear_combination
-            .0
-            .iter()
-            .filter_map(|(scalar_var, point_var)| {
-                self.points[point_var.0].map(|p| (scalar_var, point_var.1, p))
-            })
-            .map(|(scalar_var, point_multiplier, point_val)| {
-                self.scalar_val(*scalar_var) * point_multiplier * point_val
-            })
-            .sum();
-
-        // FIXME: Invert here is dangerous / potentiall incorrect without zero check.
-        self.points[unassigned_point_var.0] =
-            Some(point * (self.scalar_val(*scalar_var) * unassigned_point_var.1).invert());
-
-        Ok(())
-    }
-
-    fn prove(&mut self) -> Result<(), &'static str> {
-        // TODO: At least sort from least to most unassigned.
-        for linear_combination in core::mem::take(&mut self.constraints).iter() {
-            self.assign_constrained_point(linear_combination)?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Default)]
-struct Verifier {
-    scalars_count: usize,
-    points: Vec<RistrettoPoint>,
-    constraints: Vec<LinearCombination>,
-}
-
-impl Verifier {
-    fn alloc_scalar(&mut self) -> ScalarVar {
-        self.scalars_count += 1;
-        ScalarVar(self.scalars_count - 1)
-    }
-
-    fn alloc_point(&mut self, point: RistrettoPoint) -> PointVar {
-        self.points.push(point);
-        PointVar(self.points.len() - 1, Scalar::ONE)
-    }
-
-    fn verify(&self, proof: ()) -> Result<(), Infallible> {
-        let () = proof;
-        Ok(())
-    }
-}
-
-trait ConstraintSystem {
-    fn constrain_zero(&mut self, linear_combination: LinearCombination);
-
-    fn constrain_eq(
+    pub fn constrain_eq(
         &mut self,
         lhs: impl Into<LinearCombination>,
         rhs: impl Into<LinearCombination>,
     ) {
         self.constrain_zero(lhs.into() - rhs.into());
     }
-}
 
-impl ConstraintSystem for Prover {
-    fn constrain_zero(&mut self, linear_combination: LinearCombination) {
-        self.constraints.push(linear_combination);
+    pub fn alloc_eq(&mut self, linear_combination: impl Into<LinearCombination>) -> PointVar {
+        // Allocate an unassigned point
+        // NOTE: It would be possible here for the caller to pass a linear_combination that has no
+        // scalar vars and has all points assigned. In which case, we can simply assign this point.
+        self.points.push(None);
+        let point_var = PointVar(self.points.len() - 1);
+
+        // Constraint the newly allocated point to be equal to the linear combination.
+        self.constrain_eq(point_var, linear_combination);
+        point_var
+    }
+
+    pub fn assign_point(&mut self, var: PointVar, value: RistrettoPoint) {
+        match self.points[var.0] {
+            Some(assignment) => {
+                assert_eq!(
+                    assignment, value,
+                    "attempted to assign a point variable twice with distinct values"
+                )
+            }
+            None => self.points[var.0] = Some(value),
+        }
     }
 }
 
-impl ConstraintSystem for Verifier {
-    fn constrain_zero(&mut self, linear_combination: LinearCombination) {
-        self.constraints.push(linear_combination);
-    }
+struct Instance {
+    scalar_count: usize,
+    points: Vec<RistrettoPoint>,
+    constraints: Vec<LinearCombination>,
 }
+
+struct Witness(Vec<Scalar>);
+
+// Relation - contains public points and constants, along with variable points.
+//  - Has functions to allocate scalars.
+//  - Has functions to allocate points
+//    - What is the point of allocating points? Because we need some way to bridge the gap that
+//      verifiers must assign all points, and provers may assign only those that are not fully
+//      determine by other points.
+//  - Constant points are just provided as instance of G.
+// Instance - A relation with all variable points resolved.
+// Witness - Assignments to all scalar variables.
 
 #[cfg(test)]
 mod tests {
+    /*
     use curve25519_dalek::{RistrettoPoint, Scalar};
 
     use super::{ConstraintSystem, PointVar, Prover, ScalarVar, Verifier};
@@ -313,4 +246,5 @@ mod tests {
         example_statement(&mut verifier, scalar_var, dl_pair_vars);
         verifier.verify(proof).unwrap();
     }
+    */
 }
