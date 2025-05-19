@@ -202,7 +202,7 @@ impl Relation {
             .points
             .into_iter()
             .enumerate()
-            .map(|(i, point)| point.ok_or(Error::UnassignedPoint(i)))
+            .map(|(index, point)| point.ok_or(Error::UnassignedPoint { index }))
             .collect::<Result<_, _>>()?;
 
         Ok(Instance {
@@ -212,7 +212,7 @@ impl Relation {
         })
     }
 
-    pub fn prove(mut self, witness: Witness) -> Result<Proof, Error> {
+    pub fn assign_witness(mut self, witness: &Witness) -> Result<Instance, Error> {
         // TODO: Its possible that we could enforce this at compile-time instead.
         if witness.0.len() != self.scalar_count {
             return Err(Error::InvalidWitnessLength {
@@ -261,7 +261,7 @@ impl Relation {
                 .collect::<Vec<_>>();
 
             // Extract the one unassigned point from the vector.
-            if unassigned_points.len() == 0 {
+            if unassigned_points.is_empty() {
                 continue;
             }
             if unassigned_points.len() > 1 {
@@ -270,6 +270,7 @@ impl Relation {
             let unassigned_point = unassigned_points[0];
 
             // Evaluate the terms with assigned points to determine the unassigned point.
+            // NOTE: Could be optimized by using a proper MSM.
             self.points[unassigned_point.0] = constraint
                 .0
                 .iter()
@@ -279,18 +280,14 @@ impl Relation {
                 .fold(
                     RistrettoPoint::identity(),
                     |value, (scalar_var, weight, point)| {
-                        value
-                            + (scalar_var.map(|s| witness.0[s.0]).unwrap_or(Scalar::ONE) * weight)
-                                * point
+                        value + (witness.scalar_val(scalar_var) * weight) * point
                     },
                 )
                 .neg()
                 .into();
         }
 
-        self.into_instance()
-            .expect("all points should be assigned")
-            .prove(witness)
+        Ok(self.into_instance().expect("all points should be assigned"))
     }
 }
 
@@ -303,17 +300,82 @@ struct Instance {
 }
 
 impl Instance {
-    pub fn prove(mut self, witness: Witness) -> Result<Proof, Error> {}
+    pub fn prove(&self, witness: &Witness) -> Result<Proof, Error> {
+        // TODO: Its possible that we could enforce this at compile-time instead.
+        if witness.0.len() != self.scalar_count {
+            return Err(Error::InvalidWitnessLength {
+                expected: self.scalar_count,
+                received: witness.0.len(),
+            });
+        }
+
+        // Check the constraints, to make sure everything actually works.
+        for (index, constraint) in self.constraints.iter().enumerate() {
+            // Evaluate the terms with assigned points to determine the unassigned point.
+            // NOTE: When proving, this computation duplicates what is done to assign points variables.
+            let eval = constraint
+                .0
+                .iter()
+                .fold(RistrettoPoint::identity(), |value, term| {
+                    value
+                        + (witness.scalar_val(term.scalar) * term.weight)
+                            * self.points[term.point.0]
+                });
+
+            if eval != RistrettoPoint::identity() {
+                return Err(Error::ConstraintEvalNotZero { index });
+            }
+        }
+
+        // Obviously not a real proof.
+        Ok(Proof {})
+    }
+
+    pub fn verify(&self, proof: &Proof) -> Result<(), Error> {
+        // LGTM 👌
+        let Proof {} = proof;
+        Ok(())
+    }
+
+    pub fn point_val(&self, var: PointVar) -> RistrettoPoint {
+        self.points[var.0]
+    }
 }
 
+#[derive(Default, Clone, Debug)]
 struct Witness(Vec<Scalar>);
+
+impl Witness {
+    pub fn assign_scalar(&mut self, var: ScalarVar, scalar: impl Into<Scalar>) {
+        if self.0.len() <= var.0 {
+            self.0.resize(var.0 + 1, Scalar::ZERO);
+        }
+        self.0[var.0] = scalar.into();
+    }
+
+    fn scalar_val(&self, var: impl Into<Option<ScalarVar>>) -> Scalar {
+        var.into().map(|var| self.0[var.0]).unwrap_or(Scalar::ONE)
+    }
+}
+
+impl FromIterator<(ScalarVar, Scalar)> for Witness {
+    fn from_iter<T: IntoIterator<Item = (ScalarVar, Scalar)>>(iter: T) -> Self {
+        iter.into_iter()
+            .fold(Witness::default(), |mut witness, (var, val)| {
+                witness.assign_scalar(var, val);
+                witness
+            })
+    }
+}
 
 #[derive(Clone, Debug, thiserror::Error)]
 enum Error {
-    #[error("point variable with index {0} is unassigned")]
-    UnassignedPoint(usize),
+    #[error("point variable with index {index} is unassigned")]
+    UnassignedPoint { index: usize },
     #[error("witness length of {received} does not match the expected length for the relation, {expected}")]
     InvalidWitnessLength { expected: usize, received: usize },
+    #[error("constraint does not evaluates to non-zero value: {index}")]
+    ConstraintEvalNotZero { index: usize },
 }
 
 // Relation - contains public points and constants, along with variable points.
@@ -328,20 +390,24 @@ enum Error {
 
 #[cfg(test)]
 mod tests {
-    /*
     use curve25519_dalek::{RistrettoPoint, Scalar};
 
-    use super::{ConstraintSystem, PointVar, Prover, ScalarVar, Verifier};
+    use super::{PointVar, Relation, ScalarVar, Witness};
 
     /// Example statement constraining two pairs of points to have the same discrete log.
+    /// A = x * G && B = x * H
     fn example_statement(
-        cs: &mut impl ConstraintSystem,
-        x: ScalarVar,
-        dl_pairs: [(PointVar, PointVar); 2],
-    ) {
-        let [(a, g), (b, h)] = dl_pairs;
-        cs.constrain_eq(a, x * g);
-        cs.constrain_eq(b, x * h);
+        g: RistrettoPoint,
+        h: RistrettoPoint,
+    ) -> (Relation, ScalarVar, (PointVar, PointVar)) {
+        let mut rel = Relation::default();
+        let x = rel.alloc_scalar();
+        let (g_var, h_var) = (rel.alloc_point(g), rel.alloc_point(h));
+
+        let a = rel.alloc_eq(x * g_var);
+        let b = rel.alloc_eq(x * h_var);
+
+        (rel, x, (a, b))
     }
 
     fn example() {
@@ -349,34 +415,22 @@ mod tests {
         let h = RistrettoPoint::random(&mut rand::thread_rng());
 
         let (proof, a, b) = {
-            let scalar = Scalar::random(&mut rand::thread_rng());
+            let (relation, x_var, (a_var, b_var)) = example_statement(g, h);
 
-            let mut prover = Prover::default();
-            let scalar_var = prover.alloc_scalar(scalar);
-            let dl_pair_vars = [
-                (prover.alloc_point(None), prover.alloc_point(g)),
-                (prover.alloc_point(None), prover.alloc_point(h)),
-            ];
+            let x = Scalar::random(&mut rand::thread_rng());
+            let witness = Witness::from_iter([(x_var, x)]);
 
-            example_statement(&mut prover, scalar_var, dl_pair_vars);
-
-            let proof = prover.prove().unwrap();
-
-            // Get the values assigned for a and b during proving.
-            let a = prover.point_val(dl_pair_vars[0].0).unwrap();
-            let b = prover.point_val(dl_pair_vars[1].0).unwrap();
+            let instance = relation.assign_witness(&witness).unwrap();
+            let proof = instance.prove(&witness).unwrap();
+            let a = instance.point_val(a_var);
+            let b = instance.point_val(b_var);
 
             (proof, a, b)
         };
 
-        let mut verifier = Verifier::default();
-        let scalar_var = verifier.alloc_scalar();
-        let dl_pair_vars = [
-            (verifier.alloc_point(a), verifier.alloc_point(g)),
-            (verifier.alloc_point(b), verifier.alloc_point(g)),
-        ];
-        example_statement(&mut verifier, scalar_var, dl_pair_vars);
-        verifier.verify(proof).unwrap();
+        let (mut relation, _, (a_var, b_var)) = example_statement(g, h);
+        relation.assign_point(a_var, a);
+        relation.assign_point(b_var, b);
+        relation.into_instance().unwrap().verify(&proof).unwrap();
     }
-    */
 }
