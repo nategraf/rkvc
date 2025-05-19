@@ -212,7 +212,7 @@ impl Relation {
         })
     }
 
-    pub fn assign_witness(mut self, witness: &Witness) -> Result<Instance, Error> {
+    pub fn prove(mut self, witness: &Witness) -> Result<(Instance, Proof), Error> {
         // TODO: Its possible that we could enforce this at compile-time instead.
         if witness.0.len() != self.scalar_count {
             return Err(Error::InvalidWitnessLength {
@@ -287,7 +287,9 @@ impl Relation {
                 .into();
         }
 
-        Ok(self.into_instance().expect("all points should be assigned"))
+        let instance = self.into_instance().expect("all points should be assigned");
+        let proof = instance.prove(witness)?;
+        Ok((instance, proof))
     }
 }
 
@@ -392,45 +394,69 @@ enum Error {
 mod tests {
     use curve25519_dalek::{RistrettoPoint, Scalar};
 
-    use super::{PointVar, Relation, ScalarVar, Witness};
+    use super::{Error, PointVar, Proof, Relation, ScalarVar, Witness};
 
     /// Example statement constraining two pairs of points to have the same discrete log.
     /// A = x * G && B = x * H
-    fn example_statement(
-        g: RistrettoPoint,
-        h: RistrettoPoint,
-    ) -> (Relation, ScalarVar, (PointVar, PointVar)) {
-        let mut rel = Relation::default();
-        let x = rel.alloc_scalar();
-        let (g_var, h_var) = (rel.alloc_point(g), rel.alloc_point(h));
-
-        let a = rel.alloc_eq(x * g_var);
-        let b = rel.alloc_eq(x * h_var);
-
-        (rel, x, (a, b))
+    struct DlEqRelation {
+        rel: Relation,
+        pub x: ScalarVar,
+        pub a: PointVar,
+        pub b: PointVar,
     }
 
+    struct DlEqInstance {
+        pub a: RistrettoPoint,
+        pub b: RistrettoPoint,
+    }
+
+    impl DlEqRelation {
+        pub fn new(g: RistrettoPoint, h: RistrettoPoint) -> Self {
+            let mut rel = Relation::default();
+            let x = rel.alloc_scalar();
+            let (g_var, h_var) = (rel.alloc_point(g), rel.alloc_point(h));
+
+            let a = rel.alloc_eq(x * g_var);
+            let b = rel.alloc_eq(x * h_var);
+
+            Self { rel, x, a, b }
+        }
+
+        pub fn prove(self, x: Scalar) -> Result<(DlEqInstance, Proof), Error> {
+            let mut witness = Witness::default();
+            witness.assign_scalar(self.x, x);
+
+            let (instance, proof) = self.rel.prove(&witness)?;
+            let a = instance.point_val(self.a);
+            let b = instance.point_val(self.b);
+
+            Ok((DlEqInstance { a, b }, proof))
+        }
+
+        pub fn verify(mut self, instance: &DlEqInstance, proof: &Proof) -> Result<(), Error> {
+            self.rel.assign_point(self.a, instance.a);
+            self.rel.assign_point(self.b, instance.b);
+            self.rel.into_instance()?.verify(proof)
+        }
+    }
+
+    #[test]
     fn example() {
         let g = RistrettoPoint::random(&mut rand::thread_rng());
         let h = RistrettoPoint::random(&mut rand::thread_rng());
 
-        let (proof, a, b) = {
-            let (relation, x_var, (a_var, b_var)) = example_statement(g, h);
+        let (instance, proof) = {
+            let relation = DlEqRelation::new(g, h);
 
             let x = Scalar::random(&mut rand::thread_rng());
-            let witness = Witness::from_iter([(x_var, x)]);
+            let (instance, proof) = relation.prove(x).unwrap();
 
-            let instance = relation.assign_witness(&witness).unwrap();
-            let proof = instance.prove(&witness).unwrap();
-            let a = instance.point_val(a_var);
-            let b = instance.point_val(b_var);
-
-            (proof, a, b)
+            (instance, proof)
         };
 
-        let (mut relation, _, (a_var, b_var)) = example_statement(g, h);
-        relation.assign_point(a_var, a);
-        relation.assign_point(b_var, b);
-        relation.into_instance().unwrap().verify(&proof).unwrap();
+        let relation = DlEqRelation::new(g, h);
+        relation.verify(&instance, &proof).unwrap();
+
+        // This is where the verifier might use (a, b) from the instance/message.
     }
 }
