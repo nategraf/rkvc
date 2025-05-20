@@ -15,7 +15,7 @@ use typenum::{Double, Unsigned};
 
 use crate::{
     attributes::{AttributeArray, AttributeCount, Attributes, Encoder, EncoderOutput},
-    pederson::{PedersonCommitment, PedersonGenerators},
+    pedersen::{PedersenCommitment, PedersenGenerators},
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, ProofError,
         Prover, SchnorrCS, Transcript, Verifier,
@@ -97,13 +97,13 @@ pub struct Bulletproof<Msg: AttributeCount> {
     /// A Bulletproof ensuring that each attribute in the message is in its expected range.
     pub bulletproof: Option<bulletproofs::RangeProof>,
     /// Commitments to range-constrained scalars in the message attributes, each using the same
-    /// pair of Pederson commitment generators such that they can be constrained by a single
+    /// pair of Pedersen commitment generators such that they can be constrained by a single
     /// bulletproof.
     ///
     /// Attributes of the native field type do not need a range check commitment, and so the
     /// respective index in this array will be populated with `None`.
     pub bulletproof_commits:
-        AttributeArray<Option<PedersonCommitment<CompressedRistretto, RistrettoScalar>>, Msg>,
+        AttributeArray<Option<PedersenCommitment<CompressedRistretto, RistrettoScalar>>, Msg>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -158,7 +158,7 @@ impl From<crate::zkp::ProofError> for VerifyError {
 
 impl<Msg: AttributeCount> Bulletproof<Msg> {
     pub fn prove(
-        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        commit: &PedersenCommitment<RistrettoPoint, Msg>,
         msg: &Msg,
         blind: RistrettoScalar,
     ) -> Result<(Bulletproof<Msg>, SchnorrProof), ProveError>
@@ -210,7 +210,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         // Seperate generators are used to commit to the individual range-check values because all
         // values in a batched range check must be committed to using the same generators.
         let bulletproof_commit_gens =
-            PedersonGenerators::<RistrettoPoint, RistrettoScalar>::default();
+            PedersenGenerators::<RistrettoPoint, RistrettoScalar>::default();
 
         // Allocate variables for the linking of the commitment opening to the range proof.
         let bulletproof_commit_gen_var = prover
@@ -245,7 +245,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
                 })
             })
             .collect();
-        let commits: AttributeArray<Option<PedersonCommitment<_, _>>, Msg> = openings
+        let commits: AttributeArray<Option<PedersenCommitment<_, _>>, Msg> = openings
             .iter()
             .map(|opening| {
                 opening.map(|(x, blind)| bulletproof_commit_gens.commit_with_blind(&x, blind))
@@ -262,7 +262,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
             if let Some(x_commit) = x_commit {
                 // unwrap used here because opening being None is an implementation error.
                 let (_, blind) = opening.unwrap();
-                // Link the scalar used for the opening proof, to an opening proof for the Pederson
+                // Link the scalar used for the opening proof, to an opening proof for the Pedersen
                 // commitment used by the range proof.
                 // TODO: Use a distinct label here for the allocate_scalar call.
                 let mut constraint = Constraint::<Prover>::new();
@@ -287,8 +287,8 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         // NOTE: This could be more efficient by passing the commitments calculated earlier, but
         // recomputing results in a cleaner interface. There is likely some way to improve this.
         let bulletproof_commit_gens =
-            PedersonGenerators::<RistrettoPoint, RistrettoScalar>::default();
-        let commits: AttributeArray<Option<PedersonCommitment<_, _>>, Msg> = openings
+            PedersenGenerators::<RistrettoPoint, RistrettoScalar>::default();
+        let commits: AttributeArray<Option<PedersenCommitment<_, _>>, Msg> = openings
             .iter()
             .map(|opening| {
                 opening.map(|(x, blind)| {
@@ -366,7 +366,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     pub fn verify(
         &self,
         schnorr_proof: &SchnorrProof,
-        commit: &PedersonCommitment<CompressedRistretto, Msg>,
+        commit: &PedersenCommitment<CompressedRistretto, Msg>,
     ) -> Result<(), VerifyError>
     where
         Msg: Attributes<RangeProofEncoder<RistrettoScalar>>,
@@ -419,7 +419,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
         // Seperate generators are used to commit to the individual range-check values because all
         // values in a batched range check must be committed to using the same generators.
         let bulletproof_commit_gens =
-            PedersonGenerators::<RistrettoPoint, RistrettoScalar>::default();
+            PedersenGenerators::<RistrettoPoint, RistrettoScalar>::default();
 
         // Allocate variables for the linking of the commitment opening to the range proof.
         let bulletproof_commit_gen_var = verifier.alloc_point((
@@ -452,7 +452,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
             // Attributes with no bit constraints do not need to be checked.
             // TODO: Enforce sub-range membership.
             if let Some(_bits) = bits {
-                // Link the scalar used for the opening proof, to an opening proof for the Pederson
+                // Link the scalar used for the opening proof, to an opening proof for the Pedersen
                 // commitment used by the range proof.
                 let mut constraint = Constraint::<Verifier>::new();
                 constraint.add(verifier, x_var, bulletproof_commit_gen_var)?;
@@ -513,7 +513,7 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
                 .ok_or(VerifyError::MalformedProof)?;
             bulletproof.verify_multiple_with_rng(
                 &BulletproofGens::new(bits_max as usize, self.bulletproof_commits.len()),
-                &PedersonGenerators::default().into(),
+                &PedersenGenerators::default().into(),
                 transcript,
                 &bulletproof_commits[..check_count.next_power_of_two()],
                 bits_max as usize,
@@ -524,8 +524,8 @@ impl<Msg: AttributeCount> Bulletproof<Msg> {
     }
 }
 
-impl From<PedersonGenerators<RistrettoPoint, RistrettoScalar>> for bulletproofs::PedersenGens {
-    fn from(value: PedersonGenerators<RistrettoPoint, RistrettoScalar>) -> Self {
+impl From<PedersenGenerators<RistrettoPoint, RistrettoScalar>> for bulletproofs::PedersenGens {
+    fn from(value: PedersenGenerators<RistrettoPoint, RistrettoScalar>) -> Self {
         Self {
             B: value.1[0],
             B_blinding: value.0,
@@ -539,7 +539,7 @@ mod test {
     use rkvc_derive::Attributes;
 
     use super::{Bulletproof, VerifyError};
-    use crate::pederson::PedersonCommitment;
+    use crate::pedersen::PedersenCommitment;
 
     #[derive(Attributes)]
     struct Example {
@@ -557,7 +557,7 @@ mod test {
             c: 6,
             d: 7,
         };
-        let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
+        let (commit, blind) = PedersenCommitment::<RistrettoPoint, Example>::commit(
             &example,
             &mut rand::thread_rng(),
         );
@@ -576,7 +576,7 @@ mod test {
             c: 6,
             d: 7,
         };
-        let (commit, blind) = PedersonCommitment::<RistrettoPoint, Example>::commit(
+        let (commit, blind) = PedersenCommitment::<RistrettoPoint, Example>::commit(
             &example,
             &mut rand::thread_rng(),
         );
@@ -589,7 +589,7 @@ mod test {
             d: 8,
         };
         let bad_commit =
-            PedersonCommitment::<RistrettoPoint, Example>::commit_with_blind(&bad_example, blind);
+            PedersenCommitment::<RistrettoPoint, Example>::commit_with_blind(&bad_example, blind);
         let Err(VerifyError::ZkpError(crate::zkp::ProofError::VerificationFailure)) =
             bulletproof.verify(&schnorr_proof, &bad_commit.compress())
         else {

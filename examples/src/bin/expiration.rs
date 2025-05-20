@@ -5,7 +5,7 @@ use blake2::Blake2b512;
 use curve25519_dalek::{ristretto::CompressedRistretto, RistrettoPoint, Scalar};
 use rkvc::{
     cmz::{Key, Mac, PublicParameters},
-    pederson::PedersonCommitment,
+    pedersen::PedersenCommitment,
     rand,
     range::Bulletproof,
     zkp::{Prover, Transcript, Verifier},
@@ -74,7 +74,7 @@ impl Credential {
         // TODO: Find a more elegant way to handle this. Possibly the commits should not be
         // included in the rkvc Bulletproof struct, and instead provided separately.
         *bulletproof.bulletproof_commits.expiration_mut() =
-            Some(PedersonCommitment::commit_with_blind(&expiration, expiration_blind).compress());
+            Some(PedersenCommitment::commit_with_blind(&expiration, expiration_blind).compress());
 
         Ok(CredentialPresentation {
             presentation,
@@ -112,7 +112,7 @@ impl Issuer {
             &mut transcript,
         );
 
-        // Constrain the commitments used for the Pederson commitment within CMZ and the
+        // Constrain the commitments used for the Pedersen commitment within CMZ and the
         // commitments used for the (batched) range proof to open to the same values.
         let msg_variables = self
             .key

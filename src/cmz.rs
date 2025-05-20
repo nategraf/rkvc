@@ -17,7 +17,7 @@ use typenum::Unsigned;
 
 use crate::{
     attributes::{AttributeArray, AttributeCount, Attributes, IdentityEncoder, UintEncoder},
-    pederson::{PedersonCommitment, PedersonGenerators},
+    pedersen::{PedersenCommitment, PedersenGenerators},
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover, SchnorrCS,
         Transcript, Verifier,
@@ -51,7 +51,7 @@ where
 {
     pub u: G,
     pub commit_v: G,
-    /// An array of Pederson commitments to the attributes using the generators U and the basepoint
+    /// An array of Pedersen commitments to the attributes using the generators U and the basepoint
     /// of the group.
     pub commit_msg: AttributeArray<G, Msg>,
 }
@@ -144,7 +144,7 @@ where
 
     pub fn blind_mac(
         &self,
-        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        commit: &PedersenCommitment<RistrettoPoint, Msg>,
     ) -> Mac<RistrettoPoint, Msg> {
         // Use a hasher to generate the secret dlog of U from a combination of the secret key and
         // the commitment. Ensures that two messages will not be mac'd with the same U. Note that
@@ -238,14 +238,14 @@ where
     Msg: AttributeCount,
     G: Group,
 {
-    /// Converts the public public public parameters into [PedersonGenerators] for use in
+    /// Converts the public public public parameters into [PedersenGenerators] for use in
     /// committing a message than can then be used as input for a blind MAC.
     ///
     /// Uses the group generator here as the blind generator as a requirement to then be
     /// able to remove the blinding from the final MAC. Without this, the blinding factor for a
     /// commit would need to be carried as part of the MAC.
-    pub fn into_pederson(self) -> PedersonGenerators<G, Msg> {
-        PedersonGenerators(G::generator(), self.1)
+    pub fn into_pedersen(self) -> PedersenGenerators<G, Msg> {
+        PedersenGenerators(G::generator(), self.1)
     }
 }
 
@@ -572,7 +572,7 @@ mod test {
         // the MAC. This should generate a MAC that is the same (except U) as a plaintext.
         let (commit, blind) = pp
             .clone()
-            .into_pederson()
+            .into_pedersen()
             .commit(&example, rand::thread_rng());
         let mut mac = key.blind_mac(&commit);
         mac.remove_blind(blind);
@@ -598,7 +598,7 @@ mod test {
 
         let (commit, blind) = pp
             .clone()
-            .into_pederson()
+            .into_pedersen()
             .commit(&example, rand::thread_rng());
         let mut mac = key.blind_mac(&commit);
         mac.remove_blind(blind);

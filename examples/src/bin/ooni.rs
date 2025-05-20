@@ -9,7 +9,7 @@ use curve25519_dalek::{
 };
 use rkvc::{
     cmz::{Key, Mac, Presentation as CmzPresentation, PublicParameters},
-    pederson::{PedersonCommitment, PedersonGenerators},
+    pedersen::{PedersenCommitment, PedersenGenerators},
     rand,
     range::Bulletproof,
     zkp::{CompactProof as SchnorrProof, Prover, Transcript, Verifier},
@@ -54,13 +54,13 @@ impl Add<OoniIssuanceAttributes> for OoniAttributes {
 }
 
 impl OoniIssuanceAttributes {
-    /// Create [PedersonGenerators] for [OoniIssuanceAttributes] from the given generators for
+    /// Create [PedersenGenerators] for [OoniIssuanceAttributes] from the given generators for
     /// [OoniAttributes] by taking a subset of the attibute commitment generators plus the blinding
     /// generator.
-    fn pederson_generators_from(
-        gens: &PedersonGenerators<RistrettoPoint, OoniAttributes>,
-    ) -> PedersonGenerators<RistrettoPoint, Self> {
-        PedersonGenerators(gens.0, [*gens.1.pseudonym_key()].into())
+    fn pedersen_generators_from(
+        gens: &PedersenGenerators<RistrettoPoint, OoniAttributes>,
+    ) -> PedersenGenerators<RistrettoPoint, Self> {
+        PedersenGenerators(gens.0, [*gens.1.pseudonym_key()].into())
     }
 }
 
@@ -76,7 +76,7 @@ struct CredentialPresentation {
 }
 
 struct IncrementMeasurementCountRequest {
-    pub commit: PedersonCommitment<CompressedRistretto, OoniAttributes>,
+    pub commit: PedersenCommitment<CompressedRistretto, OoniAttributes>,
     pub presentation: CmzPresentation<CompressedRistretto, OoniAttributes>,
     pub schnorr_proof: SchnorrProof,
 }
@@ -142,9 +142,9 @@ impl Credential {
         // Reset the value in the commit, which will be used for the DLEQ check with CMZ commit.
         // TODO: Find a more elegant way to handle this.
         *bulletproof.bulletproof_commits.created_at_mut() =
-            Some(PedersonCommitment::commit_with_blind(&created_at, created_at_blind).compress());
+            Some(PedersenCommitment::commit_with_blind(&created_at, created_at_blind).compress());
         *bulletproof.bulletproof_commits.measurement_count_mut() = Some(
-            PedersonCommitment::commit_with_blind(&measurement_count, measurement_count_blind)
+            PedersenCommitment::commit_with_blind(&measurement_count, measurement_count_blind)
                 .compress(),
         );
 
@@ -166,9 +166,9 @@ impl Credential {
             b"rkvc_examples::ooni::Credential::increment_measurement_count::constraints",
             &mut transcript,
         );
-        let pederson_gens = pp.clone().into_pederson();
+        let pedersen_gens = pp.clone().into_pedersen();
 
-        let (commit, blind) = pederson_gens.commit(&self.attributes, rand::thread_rng());
+        let (commit, blind) = pedersen_gens.commit(&self.attributes, rand::thread_rng());
 
         let (presentation, msg_variables) = self.mac.prove_presentation_constraints(
             &mut prover,
@@ -176,7 +176,7 @@ impl Credential {
             pp,
             rand::thread_rng(),
         );
-        pederson_gens.prove_opening_constraints(&mut prover, &commit, &msg_variables, blind);
+        pedersen_gens.prove_opening_constraints(&mut prover, &commit, &msg_variables, blind);
         let schnorr_proof = prover.prove_compact();
 
         (
@@ -262,7 +262,7 @@ impl Issuer {
         &self,
         at: u64,
         is_trusted: bool,
-        issuance_attr_commit: &PedersonCommitment<CompressedRistretto, OoniIssuanceAttributes>,
+        issuance_attr_commit: &PedersenCommitment<CompressedRistretto, OoniIssuanceAttributes>,
         opening_proof: &SchnorrProof,
     ) -> anyhow::Result<IssuanceResponse> {
         let attributes = OoniAttributes {
@@ -271,10 +271,10 @@ impl Issuer {
             created_at: at,
             measurement_count: 0,
         };
-        // Derive the pederson generators used from the public public parameters.
-        let pederson_gens = self.key.public_parameters().into_pederson();
-        let issuance_pederson_gens =
-            OoniIssuanceAttributes::pederson_generators_from(&pederson_gens);
+        // Derive the pedersen generators used from the public public parameters.
+        let pedersen_gens = self.key.public_parameters().into_pedersen();
+        let issuance_pedersen_gens =
+            OoniIssuanceAttributes::pedersen_generators_from(&pedersen_gens);
 
         let issuance_attr_commit = issuance_attr_commit
             .decompress()
@@ -282,11 +282,11 @@ impl Issuer {
 
         // Verify that the client knows a valid opening of the issuance attributes (i.e.
         // pseudonym key) message.
-        issuance_pederson_gens.verify_opening(&issuance_attr_commit, opening_proof)?;
+        issuance_pedersen_gens.verify_opening(&issuance_attr_commit, opening_proof)?;
 
         // Commit with blinding factor of zero, then add the pseudonym_key committed by the client.
         let attributes_commit =
-            pederson_gens.commit_with_blind(&attributes, Scalar::ZERO) + issuance_attr_commit;
+            pedersen_gens.commit_with_blind(&attributes, Scalar::ZERO) + issuance_attr_commit;
 
         let mac = self.key.blind_mac(&attributes_commit);
         Ok(IssuanceResponse { attributes, mac })
@@ -308,7 +308,7 @@ impl Issuer {
             &mut transcript,
         );
 
-        // Constrain the commitments used for the Pederson commitment within CMZ and the
+        // Constrain the commitments used for the Pedersen commitment within CMZ and the
         // commitments used for the (batched) range proof to open to the same values.
         let msg_variables = self
             .key
@@ -330,7 +330,7 @@ impl Issuer {
             .decompress()
             .context("failed to decompress created_at commit")?;
         *bulletproof.bulletproof_commits.created_at_mut() = Some(
-            (PedersonCommitment::commit_with_blind(&Scalar::from(max_timestamp), Scalar::ZERO)
+            (PedersenCommitment::commit_with_blind(&Scalar::from(max_timestamp), Scalar::ZERO)
                 - created_at_commit)
                 .compress(),
         );
@@ -362,7 +362,7 @@ impl Issuer {
             b"rkvc_examples::ooni::Credential::increment_measurement_count::constraints",
             &mut transcript,
         );
-        let pederson_gens = self.key.public_parameters().into_pederson();
+        let pedersen_gens = self.key.public_parameters().into_pedersen();
         let commit = req
             .commit
             .decompress()
@@ -376,15 +376,15 @@ impl Issuer {
         let msg_variables = self
             .key
             .constrain_presentation(&mut verifier, &req.presentation)?;
-        pederson_gens.constrain_opening(&mut verifier, &commit, &msg_variables)?;
+        pedersen_gens.constrain_opening(&mut verifier, &commit, &msg_variables)?;
         verifier.verify_compact(&req.schnorr_proof)?;
 
-        // Increment the hidden measurement count by adding the Pederson generator point associated
+        // Increment the hidden measurement count by adding the Pedersen generator point associated
         // with the measurement count. This will result in a commitment to a valid message under
         // the assumption that each chain of credentials starts with a measurement count of zero,
         // and is incremented less than than 2^64 times.
-        let updated_commit: PedersonCommitment<_, OoniAttributes> =
-            PedersonCommitment::from_elem(commit.elem + pederson_gens.1.measurement_count());
+        let updated_commit: PedersenCommitment<_, OoniAttributes> =
+            PedersenCommitment::from_elem(commit.elem + pedersen_gens.1.measurement_count());
 
         // Issue a new MAC over the updated commit.
         // NOTE: Nothing prevents the client from presenting the original credential, with the
@@ -426,12 +426,12 @@ fn main() -> Result<()> {
     };
 
     // Client generates a commitment to their issuance request attributes, and an opening proof.
-    let issuance_pederson_gens =
-        OoniIssuanceAttributes::pederson_generators_from(&pp.clone().into_pederson());
+    let issuance_pedersen_gens =
+        OoniIssuanceAttributes::pedersen_generators_from(&pp.clone().into_pedersen());
     let (issuance_attr_commit, issance_blind) =
-        issuance_pederson_gens.commit(&issuance_attr, rand::thread_rng());
+        issuance_pedersen_gens.commit(&issuance_attr, rand::thread_rng());
     let issuance_opening_proof =
-        issuance_pederson_gens.prove_opening(&issuance_attr_commit, &issuance_attr, issance_blind);
+        issuance_pedersen_gens.prove_opening(&issuance_attr_commit, &issuance_attr, issance_blind);
 
     tracing::info!("Client sending issuance request with attributes: {issuance_attr:?}");
 

@@ -1,4 +1,4 @@
-//! Pederson commitments applied to structured messages.
+//! Pedersen commitments applied to structured messages.
 
 use core::{
     convert::Infallible,
@@ -29,23 +29,23 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub struct PedersonCommitment<G, Msg> {
+pub struct PedersenCommitment<G, Msg> {
     pub elem: G,
     _phantom_msg: PhantomData<Msg>,
 }
 
 #[derive(Clone, Debug)]
-pub struct PedersonGenerators<G, Msg: AttributeCount>(pub G, pub AttributeArray<G, Msg>);
+pub struct PedersenGenerators<G, Msg: AttributeCount>(pub G, pub AttributeArray<G, Msg>);
 
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
-pub enum PedersonError {
+pub enum PedersenError {
     #[error("verification failed")]
     VerificationError,
 }
 
-impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeCount> PedersonGenerators<G, Msg> {
-    /// Manually construct a set of Pederson commitment generators.
+impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeCount> PedersenGenerators<G, Msg> {
+    /// Manually construct a set of Pedersen commitment generators.
     ///
     /// Discrete log relationship between the generators must be unknown to the party producing a
     /// commitment using these generators. If the discrete log is known to the committer, they may
@@ -57,18 +57,18 @@ impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeCount> PedersonGenerat
 
     /// Default generator point used for blinding commitments.
     pub fn blind_gen_default() -> G {
-        G::hash_from_bytes::<Blake2b512>(b"rkvc::pederson::PedersonCommitment::blind_generator")
+        G::hash_from_bytes::<Blake2b512>(b"rkvc::pedersen::PedersenCommitment::blind_generator")
     }
 }
 
 impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeLabels> Default
-    for PedersonGenerators<G, Msg>
+    for PedersenGenerators<G, Msg>
 {
     /// Generate a default set of generators from the given message type.
     ///
     /// Each attribute has a generator that is derived from the hash-to-group of its label.
     fn default() -> Self {
-        PedersonGenerators(
+        PedersenGenerators(
             Self::blind_gen_default(),
             Msg::label_iter()
                 .map(|label| G::hash_from_bytes::<Blake2b512>(label.as_bytes()))
@@ -77,12 +77,12 @@ impl<G: Group + FromHash<OutputSize = U64>, Msg: AttributeLabels> Default
     }
 }
 
-impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
+impl<Msg: AttributeCount> PedersenGenerators<RistrettoPoint, Msg> {
     pub fn commit_with_blind(
         &self,
         msg: &Msg,
         blind: RistrettoScalar,
-    ) -> PedersonCommitment<RistrettoPoint, Msg>
+    ) -> PedersenCommitment<RistrettoPoint, Msg>
     where
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
@@ -96,7 +96,7 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
             )
             .map(|(x, g)| x * g),
         );
-        PedersonCommitment {
+        PedersenCommitment {
             elem,
             _phantom_msg: PhantomData,
         }
@@ -106,7 +106,7 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
         &self,
         msg: &Msg,
         mut rng: impl RngCore + CryptoRng,
-    ) -> (PedersonCommitment<RistrettoPoint, Msg>, RistrettoScalar)
+    ) -> (PedersenCommitment<RistrettoPoint, Msg>, RistrettoScalar)
     where
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
@@ -116,26 +116,26 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
 
     pub fn open(
         &self,
-        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        commit: &PedersenCommitment<RistrettoPoint, Msg>,
         msg: &Msg,
         blind: RistrettoScalar,
-    ) -> Result<(), PedersonError>
+    ) -> Result<(), PedersenError>
     where
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
         let eq = commit.elem.ct_eq(&self.commit_with_blind(msg, blind).elem);
         match eq.into() {
             true => Ok(()),
-            false => Err(PedersonError::VerificationError),
+            false => Err(PedersenError::VerificationError),
         }
     }
 
     /// Prove knowledge of an opening for the given commitment.
     ///
-    /// This function is paired with [PedersonGenerators::verify_opening].
+    /// This function is paired with [PedersenGenerators::verify_opening].
     pub fn prove_opening(
         &self,
-        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        commit: &PedersenCommitment<RistrettoPoint, Msg>,
         msg: &Msg,
         blind: RistrettoScalar,
     ) -> CompactProof
@@ -144,7 +144,7 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
     {
         macro_rules! label {
             ($s:literal) => {
-                concat!("rkvc::pederson::PedersonGenerators::opening::", $s)
+                concat!("rkvc::pedersen::PedersenGenerators::opening::", $s)
             };
         }
 
@@ -167,10 +167,10 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
     /// guaranteed that the prover has knowledge of a valid message, as all field elements  are
     /// valid.
     ///
-    /// This function is paired with [PedersonGenerators::prove_opening].
+    /// This function is paired with [PedersenGenerators::prove_opening].
     pub fn verify_opening(
         &self,
-        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        commit: &PedersenCommitment<RistrettoPoint, Msg>,
         proof: &CompactProof,
     ) -> Result<(), ProofError>
     where
@@ -178,7 +178,7 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
     {
         macro_rules! label {
             ($s:literal) => {
-                concat!("rkvc::pederson::PedersonGenerators::opening::", $s)
+                concat!("rkvc::pedersen::PedersenGenerators::opening::", $s)
             };
         }
 
@@ -192,11 +192,11 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
     /// Adds the constraints for the commitment opening to a [Prover], in order to compose with
     /// other statements being proven.
     ///
-    /// This function is paired with [PedersonGenerators::constrain_opening].
+    /// This function is paired with [PedersenGenerators::constrain_opening].
     pub fn prove_opening_constraints<X>(
         &self,
         prover: &mut Prover,
-        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        commit: &PedersenCommitment<RistrettoPoint, Msg>,
         msg_vars: &Array<X, Msg::N>,
         blind: RistrettoScalar,
     ) where
@@ -209,7 +209,7 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
     {
         macro_rules! label {
             ($s:literal) => {
-                concat!("rkvc::pederson::PedersonGenerators::opening::", $s)
+                concat!("rkvc::pedersen::PedersenGenerators::opening::", $s)
             };
         }
 
@@ -241,11 +241,11 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
     /// field, these constraints alone will not ensure the prover knows a valid opening (e.g. if a
     /// field should be a u64, these constraints do not ensure it is in range withing the field)
     ///
-    /// This function is paired with [PedersonGenerators::prove_opening_constraints].
+    /// This function is paired with [PedersenGenerators::prove_opening_constraints].
     pub fn constrain_opening<X>(
         &self,
         verifier: &mut Verifier,
-        commit: &PedersonCommitment<RistrettoPoint, Msg>,
+        commit: &PedersenCommitment<RistrettoPoint, Msg>,
         msg_vars: &Array<X, Msg::N>,
     ) -> Result<(), ProofError>
     where
@@ -262,26 +262,26 @@ impl<Msg: AttributeCount> PedersonGenerators<RistrettoPoint, Msg> {
             .constrain_opening(verifier, &commit.compress(), msg_vars)
     }
 
-    pub fn compress(&self) -> PedersonGenerators<CompressedRistretto, Msg> {
-        PedersonGenerators(
+    pub fn compress(&self) -> PedersenGenerators<CompressedRistretto, Msg> {
+        PedersenGenerators(
             self.0.compress(),
             self.1.iter().map(|g| g.compress()).collect(),
         )
     }
 }
 
-impl<Msg: AttributeCount> PedersonGenerators<CompressedRistretto, Msg> {
+impl<Msg: AttributeCount> PedersenGenerators<CompressedRistretto, Msg> {
     /// Add constraints for knowledge of an opening for the given commitment to a [Verifier].
     ///
     /// Note that if the message contains fields that are not in the constraint system's native
     /// field, these constraints alone will not ensure the prover knows a valid opening (e.g. if a
     /// field should be a u64, these constraints do not ensure it is in range withing the field)
     ///
-    /// This function is paired with [PedersonGenerators::prove_opening_constraints].
+    /// This function is paired with [PedersenGenerators::prove_opening_constraints].
     pub fn constrain_opening<X>(
         &self,
         verifier: &mut Verifier,
-        commit: &PedersonCommitment<CompressedRistretto, Msg>,
+        commit: &PedersenCommitment<CompressedRistretto, Msg>,
         msg_vars: &Array<X, Msg::N>,
     ) -> Result<(), ProofError>
     where
@@ -294,7 +294,7 @@ impl<Msg: AttributeCount> PedersonGenerators<CompressedRistretto, Msg> {
     {
         macro_rules! label {
             ($s:literal) => {
-                concat!("rkvc::pederson::PedersonGenerators::opening::", $s)
+                concat!("rkvc::pedersen::PedersenGenerators::opening::", $s)
             };
         }
 
@@ -312,8 +312,8 @@ impl<Msg: AttributeCount> PedersonGenerators<CompressedRistretto, Msg> {
         Ok(())
     }
 
-    pub fn decompress(&self) -> Option<PedersonGenerators<RistrettoPoint, Msg>> {
-        Some(PedersonGenerators(
+    pub fn decompress(&self) -> Option<PedersenGenerators<RistrettoPoint, Msg>> {
+        Some(PedersenGenerators(
             self.0.decompress()?,
             self.1
                 .iter()
@@ -323,8 +323,8 @@ impl<Msg: AttributeCount> PedersonGenerators<CompressedRistretto, Msg> {
     }
 }
 
-impl<G, Msg> PedersonCommitment<G, Msg> {
-    /// Construct a [PedersonCommitment] directly from an group element.
+impl<G, Msg> PedersenCommitment<G, Msg> {
+    /// Construct a [PedersenCommitment] directly from an group element.
     pub fn from_elem(elem: G) -> Self {
         Self {
             elem,
@@ -333,12 +333,12 @@ impl<G, Msg> PedersonCommitment<G, Msg> {
     }
 }
 
-impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
+impl<Msg> PedersenCommitment<RistrettoPoint, Msg> {
     pub fn commit_with_blind(msg: &Msg, blind: RistrettoScalar) -> Self
     where
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::default().commit_with_blind(msg, blind)
+        PedersenGenerators::default().commit_with_blind(msg, blind)
     }
 
     pub fn commit<R>(msg: &Msg, rng: &mut R) -> (Self, RistrettoScalar)
@@ -346,31 +346,31 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
         R: RngCore + CryptoRng + ?Sized,
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::default().commit(msg, rng)
+        PedersenGenerators::default().commit(msg, rng)
     }
 
     // TODO: The following methods, with &self receivers, have a sharp edge in that if the commit
     // is generated with non-default parameters then calling `commit.open(_)` and similar will
     // fail. Consider how this API could be improved.
-    pub fn open(&self, msg: &Msg, blind: RistrettoScalar) -> Result<(), PedersonError>
+    pub fn open(&self, msg: &Msg, blind: RistrettoScalar) -> Result<(), PedersenError>
     where
         Msg: Attributes<UintEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::default().open(self, msg, blind)
+        PedersenGenerators::default().open(self, msg, blind)
     }
 
-    /// Prove knowledge of an opening for this commitment, using the default [PedersonGenerators]
+    /// Prove knowledge of an opening for this commitment, using the default [PedersenGenerators]
     /// for the specified message type.
     ///
-    /// This function is paired with [PedersonCommitment::verify_opening].
+    /// This function is paired with [PedersenCommitment::verify_opening].
     pub fn prove_opening(&self, msg: &Msg, blind: RistrettoScalar) -> CompactProof
     where
         Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::default().prove_opening(self, msg, blind)
+        PedersenGenerators::default().prove_opening(self, msg, blind)
     }
 
-    /// Verify knowledge of an opening for this commitment, using the default [PedersonGenerators]
+    /// Verify knowledge of an opening for this commitment, using the default [PedersenGenerators]
     /// for the specified message type.
     ///
     /// Note that the message type must consist entirely of field elements (i.e. it is "identity
@@ -378,19 +378,19 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
     /// guaranteed that the prover has knowledge of a valid message, as all field elements  are
     /// valid.
     ///
-    /// This function is paired with [PedersonCommitment::prove_opening].
+    /// This function is paired with [PedersenCommitment::prove_opening].
     pub fn verify_opening(&self, proof: &CompactProof) -> Result<(), ProofError>
     where
         Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
-        PedersonGenerators::default().verify_opening(self, proof)
+        PedersenGenerators::default().verify_opening(self, proof)
     }
 
     /// Adds the constraints for the commitment opening to a [Prover], using the default
-    /// [PedersonGenerators] for the specified message type, in order to compose with other
+    /// [PedersenGenerators] for the specified message type, in order to compose with other
     /// statements being proven.
     ///
-    /// This function is paired with [PedersonGenerators::constrain_opening].
+    /// This function is paired with [PedersenGenerators::constrain_opening].
     pub fn prove_opening_constraints<X>(
         &self,
         prover: &mut Prover,
@@ -401,17 +401,17 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
         for<'a> Prover<'a>: AllocScalarVar<X, Error = Infallible>,
         X: Copy,
     {
-        PedersonGenerators::default().prove_opening_constraints(prover, self, msg_vars, blind)
+        PedersenGenerators::default().prove_opening_constraints(prover, self, msg_vars, blind)
     }
 
     /// Add constraints for knowledge of an opening for the given commitment to a [Verifier], using
-    /// the default [PedersonGenerators] for the specified message type.
+    /// the default [PedersenGenerators] for the specified message type.
     ///
     /// Note that if the message contains fields that are not in the constraint system's native
     /// field, these constraints alone will not ensure the prover knows a valid opening (e.g. if a
     /// field should be a u64, these constraints do not ensure it is in range withing the field)
     ///
-    /// This function is paired with [PedersonGenerators::prove_opening_constraints].
+    /// This function is paired with [PedersenGenerators::prove_opening_constraints].
     pub fn constrain_opening<X>(
         &self,
         verifier: &mut Verifier,
@@ -422,27 +422,27 @@ impl<Msg> PedersonCommitment<RistrettoPoint, Msg> {
         for<'a> Verifier<'a>: AllocScalarVar<X, Error = ProofError>,
         X: Copy,
     {
-        PedersonGenerators::<RistrettoPoint, Msg>::default()
+        PedersenGenerators::<RistrettoPoint, Msg>::default()
             .constrain_opening(verifier, self, msg_vars)
     }
 
-    pub fn compress(&self) -> PedersonCommitment<CompressedRistretto, Msg> {
-        PedersonCommitment {
+    pub fn compress(&self) -> PedersenCommitment<CompressedRistretto, Msg> {
+        PedersenCommitment {
             elem: self.elem.compress(),
             _phantom_msg: PhantomData,
         }
     }
 }
 
-impl<Msg> PedersonCommitment<CompressedRistretto, Msg> {
+impl<Msg> PedersenCommitment<CompressedRistretto, Msg> {
     /// Add constraints for knowledge of an opening for the given commitment to a [Verifier], using
-    /// the default [PedersonGenerators] for the specified message type.
+    /// the default [PedersenGenerators] for the specified message type.
     ///
     /// Note that if the message contains fields that are not in the constraint system's native
     /// field, these constraints alone will not ensure the prover knows a valid opening (e.g. if a
     /// field should be a u64, these constraints do not ensure it is in range withing the field)
     ///
-    /// This function is paired with [PedersonGenerators::prove_opening_constraints].
+    /// This function is paired with [PedersenGenerators::prove_opening_constraints].
     pub fn constrain_opening<X>(
         &self,
         verifier: &mut Verifier,
@@ -453,90 +453,90 @@ impl<Msg> PedersonCommitment<CompressedRistretto, Msg> {
         for<'a> Verifier<'a>: AllocScalarVar<X, Error = ProofError>,
         X: Copy,
     {
-        PedersonGenerators::<RistrettoPoint, Msg>::default()
+        PedersenGenerators::<RistrettoPoint, Msg>::default()
             .compress()
             .constrain_opening(verifier, self, msg_vars)
     }
 
-    pub fn decompress(&self) -> Option<PedersonCommitment<RistrettoPoint, Msg>> {
-        Some(PedersonCommitment {
+    pub fn decompress(&self) -> Option<PedersenCommitment<RistrettoPoint, Msg>> {
+        Some(PedersenCommitment {
             elem: self.elem.decompress()?,
             _phantom_msg: PhantomData,
         })
     }
 }
 
-impl<G, MsgLhs, MsgRhs> Add<PedersonCommitment<G, MsgRhs>> for PedersonCommitment<G, MsgLhs>
+impl<G, MsgLhs, MsgRhs> Add<PedersenCommitment<G, MsgRhs>> for PedersenCommitment<G, MsgLhs>
 where
     G: Group,
     MsgLhs: AttributeCount + Add<MsgRhs>,
     MsgRhs: AttributeCount,
 {
-    type Output = PedersonCommitment<G, <MsgLhs as Add<MsgRhs>>::Output>;
+    type Output = PedersenCommitment<G, <MsgLhs as Add<MsgRhs>>::Output>;
 
-    /// Add two [PedersonCommitment] values, which homomorphically adds the committed messages.
+    /// Add two [PedersenCommitment] values, which homomorphically adds the committed messages.
     ///
     /// The result will be a commitment to the addition of the committed messages. It is not
     /// guaranteed that there exists an opening for the added message unless every (set of) scalar
     /// field element(s) is a valid message.
-    fn add(self, rhs: PedersonCommitment<G, MsgRhs>) -> Self::Output {
-        PedersonCommitment {
+    fn add(self, rhs: PedersenCommitment<G, MsgRhs>) -> Self::Output {
+        PedersenCommitment {
             elem: self.elem + rhs.elem,
             _phantom_msg: PhantomData,
         }
     }
 }
 
-impl<MsgLhs, MsgRhs> Add<MsgRhs> for PedersonCommitment<RistrettoPoint, MsgLhs>
+impl<MsgLhs, MsgRhs> Add<MsgRhs> for PedersenCommitment<RistrettoPoint, MsgLhs>
 where
     MsgLhs: AttributeCount + Add<MsgRhs>,
     MsgRhs: Attributes<UintEncoder<RistrettoScalar>>,
-    PedersonGenerators<RistrettoPoint, MsgRhs>: Default,
+    PedersenGenerators<RistrettoPoint, MsgRhs>: Default,
 {
-    type Output = PedersonCommitment<RistrettoPoint, <MsgLhs as Add<MsgRhs>>::Output>;
+    type Output = PedersenCommitment<RistrettoPoint, <MsgLhs as Add<MsgRhs>>::Output>;
 
-    /// Adds a message to a [PedersonCommitment], homomorphically in the commitment space.
+    /// Adds a message to a [PedersenCommitment], homomorphically in the commitment space.
     ///
-    /// This uses the default [PedersonGenerators] for the RHS message.
+    /// This uses the default [PedersenGenerators] for the RHS message.
     fn add(self, rhs: MsgRhs) -> Self::Output {
-        self + PedersonGenerators::default().commit_with_blind(&rhs, RistrettoScalar::ZERO)
+        self + PedersenGenerators::default().commit_with_blind(&rhs, RistrettoScalar::ZERO)
     }
 }
 
-impl<G, MsgLhs, MsgRhs> Sub<PedersonCommitment<G, MsgRhs>> for PedersonCommitment<G, MsgLhs>
+impl<G, MsgLhs, MsgRhs> Sub<PedersenCommitment<G, MsgRhs>> for PedersenCommitment<G, MsgLhs>
 where
     G: Group,
     MsgLhs: AttributeCount + Sub<MsgRhs>,
     MsgRhs: AttributeCount,
 {
-    type Output = PedersonCommitment<G, <MsgLhs as Sub<MsgRhs>>::Output>;
+    type Output = PedersenCommitment<G, <MsgLhs as Sub<MsgRhs>>::Output>;
 
-    /// Subtract two [PedersonCommitment] values, which homomorphically subtracts the committed messages.
+    /// Subtract two [PedersenCommitment] values, which homomorphically subtracts the committed messages.
     ///
     /// The result will be a commitment to the subtraction of the committed messages. It is not
     /// guaranteed that there exists an opening for the result unless every (set of) scalar field
     /// element(s) is a valid message.
-    fn sub(self, rhs: PedersonCommitment<G, MsgRhs>) -> Self::Output {
-        PedersonCommitment {
+    fn sub(self, rhs: PedersenCommitment<G, MsgRhs>) -> Self::Output {
+        PedersenCommitment {
             elem: self.elem - rhs.elem,
             _phantom_msg: PhantomData,
         }
     }
 }
 
-impl<MsgLhs, MsgRhs> Sub<MsgRhs> for PedersonCommitment<RistrettoPoint, MsgLhs>
+impl<MsgLhs, MsgRhs> Sub<MsgRhs> for PedersenCommitment<RistrettoPoint, MsgLhs>
 where
     MsgLhs: AttributeCount + Sub<MsgRhs>,
     MsgRhs: Attributes<UintEncoder<RistrettoScalar>>,
-    PedersonGenerators<RistrettoPoint, MsgRhs>: Default,
+    PedersenGenerators<RistrettoPoint, MsgRhs>: Default,
 {
-    type Output = PedersonCommitment<RistrettoPoint, <MsgLhs as Sub<MsgRhs>>::Output>;
+    type Output = PedersenCommitment<RistrettoPoint, <MsgLhs as Sub<MsgRhs>>::Output>;
 
-    /// Subtracts a message from a [PedersonCommitment], homomorphically in the commitment space.
+    /// Subtracts a message from a [PedersenCommitment], homomorphically in the commitment space.
     ///
-    /// This uses the default [PedersonGenerators] for the RHS message.
+    /// This uses the default [PedersenGenerators] for the RHS message.
     fn sub(self, rhs: MsgRhs) -> Self::Output {
-        self - PedersonGenerators::default().commit_with_blind(&rhs, RistrettoScalar::ZERO)
+        self - PedersenGenerators::default().commit_with_blind(&rhs, RistrettoScalar::ZERO)
     }
 }
 
@@ -545,7 +545,7 @@ mod test {
     use curve25519_dalek::{RistrettoPoint, Scalar};
     use rkvc_derive::Attributes;
 
-    use super::{PedersonCommitment, PedersonError};
+    use super::{PedersenCommitment, PedersenError};
 
     #[derive(Attributes)]
     struct ExampleA {
@@ -565,7 +565,7 @@ mod test {
             a: 42,
             b: Scalar::from(5u64),
         };
-        let (commit, blind) = PedersonCommitment::<RistrettoPoint, ExampleA>::commit(
+        let (commit, blind) = PedersenCommitment::<RistrettoPoint, ExampleA>::commit(
             &example,
             &mut rand::thread_rng(),
         );
@@ -578,7 +578,7 @@ mod test {
             a: 42,
             b: Scalar::from(5u64),
         };
-        let (commit, blind) = PedersonCommitment::<RistrettoPoint, ExampleA>::commit(
+        let (commit, blind) = PedersenCommitment::<RistrettoPoint, ExampleA>::commit(
             &example,
             &mut rand::thread_rng(),
         );
@@ -588,7 +588,7 @@ mod test {
             a: 42,
             b: Scalar::from(6u64),
         };
-        let Err(PedersonError::VerificationError) = commit.open(&mangled_example, blind) else {
+        let Err(PedersenError::VerificationError) = commit.open(&mangled_example, blind) else {
             panic!("open did not fail with verification error");
         };
     }
@@ -599,7 +599,7 @@ mod test {
             a: Scalar::from(42u64),
             b: Scalar::from(5u64),
         };
-        let (commit, blind) = PedersonCommitment::<RistrettoPoint, ExampleB>::commit(
+        let (commit, blind) = PedersenCommitment::<RistrettoPoint, ExampleB>::commit(
             &example,
             &mut rand::thread_rng(),
         );
@@ -613,7 +613,7 @@ mod test {
             a: Scalar::from(42u64),
             b: Scalar::from(5u64),
         };
-        let (commit, blind) = PedersonCommitment::<RistrettoPoint, ExampleB>::commit(
+        let (commit, blind) = PedersenCommitment::<RistrettoPoint, ExampleB>::commit(
             &example,
             &mut rand::thread_rng(),
         );
@@ -624,7 +624,7 @@ mod test {
             b: Scalar::from(6u64),
         };
         let bad_commit =
-            PedersonCommitment::<RistrettoPoint, ExampleB>::commit_with_blind(&bad_example, blind);
+            PedersenCommitment::<RistrettoPoint, ExampleB>::commit_with_blind(&bad_example, blind);
         let Err(lox_zkp::ProofError::VerificationFailure) = bad_commit.verify_opening(&proof)
         else {
             panic!("verify did not fail with verification failure");
