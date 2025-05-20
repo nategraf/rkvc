@@ -148,9 +148,23 @@ impl Relation {
         ScalarVar(self.scalar_count - 1)
     }
 
+    pub fn alloc_scalars(
+        &mut self,
+        count: usize,
+    ) -> impl ExactSizeIterator<Item = ScalarVar> + use<'_> {
+        (0..count).map(|_| self.alloc_scalar())
+    }
+
     pub fn alloc_point(&mut self, point: RistrettoPoint) -> PointVar {
         self.points.push(Some(point));
         PointVar(self.points.len() - 1)
+    }
+
+    pub fn alloc_points<T>(&mut self, points: T) -> impl Iterator<Item = PointVar> + use<'_, T>
+    where
+        T: IntoIterator<Item = RistrettoPoint>,
+    {
+        points.into_iter().map(|point| self.alloc_point(point))
     }
 
     pub fn constrain_zero(&mut self, linear_combination: impl Into<LinearCombination>) {
