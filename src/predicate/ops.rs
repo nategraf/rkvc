@@ -1,10 +1,10 @@
 use alloc::{vec, vec::Vec};
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-use super::{GroupTerm, LinearCombination, PointVar, Scalar, ScalarVar, Term};
+use super::{LinearCombination, PointTerm, PointVar, Scalar, ScalarVar, Term};
 use curve25519_dalek::RistrettoPoint;
 
-impl Neg for GroupTerm {
+impl Neg for PointTerm {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -15,7 +15,7 @@ impl Neg for GroupTerm {
     }
 }
 
-impl Mul<Scalar> for GroupTerm {
+impl Mul<Scalar> for PointTerm {
     type Output = Self;
 
     fn mul(self, rhs: Scalar) -> Self::Output {
@@ -26,10 +26,10 @@ impl Mul<Scalar> for GroupTerm {
     }
 }
 
-impl Mul<GroupTerm> for Scalar {
-    type Output = GroupTerm;
+impl Mul<PointTerm> for Scalar {
+    type Output = PointTerm;
 
-    fn mul(self, rhs: GroupTerm) -> Self::Output {
+    fn mul(self, rhs: PointTerm) -> Self::Output {
         rhs * self
     }
 }
@@ -49,7 +49,7 @@ impl Neg for PointVar {
     type Output = Term;
 
     fn neg(self) -> Term {
-        GroupTerm::Var(self, -Scalar::ONE).into()
+        PointTerm::Var(self, -Scalar::ONE).into()
     }
 }
 
@@ -219,7 +219,7 @@ impl Mul<Scalar> for PointVar {
 
     fn mul(self, rhs: Scalar) -> Term {
         Term {
-            point: GroupTerm::Var(self, rhs),
+            point: PointTerm::Var(self, rhs),
             scalar: None,
         }
     }

@@ -77,20 +77,20 @@ struct PointVar(usize);
 /// basepoint for a commitment) or a variable that is part of the instance definition (e.g. a
 /// public key for a signature).
 #[derive(Copy, Clone, Debug)]
-enum GroupTerm {
+enum PointTerm {
     /// An instance variable, as an identifier and a constant scalar weight.
     Var(PointVar, Scalar),
     /// A constant point in the relation.
     Const(RistrettoPoint),
 }
 
-impl From<RistrettoPoint> for GroupTerm {
+impl From<RistrettoPoint> for PointTerm {
     fn from(value: RistrettoPoint) -> Self {
         Self::Const(value)
     }
 }
 
-impl From<PointVar> for GroupTerm {
+impl From<PointVar> for PointTerm {
     fn from(var: PointVar) -> Self {
         Self::Var(var, Scalar::ONE)
     }
@@ -103,7 +103,7 @@ struct Term {
     /// this term only a public point.
     scalar: Option<ScalarVar>,
     /// The group element part of a term in a [LinearCombination].
-    point: GroupTerm,
+    point: PointTerm,
 }
 
 /// A linear combination of scalar variables (private the prover) and point variables (known to
@@ -129,8 +129,8 @@ impl From<PointVar> for Term {
     }
 }
 
-impl From<GroupTerm> for Term {
-    fn from(value: GroupTerm) -> Self {
+impl From<PointTerm> for Term {
+    fn from(value: PointTerm) -> Self {
         Self {
             scalar: None,
             point: value,
@@ -266,7 +266,7 @@ impl Relation {
                 .map(|term| {
                     let Term {
                         scalar,
-                        point: GroupTerm::Var(var, weight),
+                        point: PointTerm::Var(var, weight),
                     } = term
                     else {
                         panic!("invariant check failed: constant is not assigned")
@@ -314,16 +314,16 @@ impl Relation {
 
     fn is_term_assigned(&self, term: &Term) -> bool {
         match term.point {
-            GroupTerm::Const(_) => true,
-            GroupTerm::Var(var, _) => self.points[var.0].is_some(),
+            PointTerm::Const(_) => true,
+            PointTerm::Var(var, _) => self.points[var.0].is_some(),
         }
     }
 
     fn eval_term(&self, term: &Term, witness: &Witness) -> Result<RistrettoPoint, Error> {
         let scalar = witness.scalar_val(term.scalar);
         Ok(match term.point {
-            GroupTerm::Const(point) => point * scalar,
-            GroupTerm::Var(var, weight) => {
+            PointTerm::Const(point) => point * scalar,
+            PointTerm::Var(var, weight) => {
                 self.points[var.0].ok_or(Error::UnassignedPoint { index: var.0 })?
                     * (scalar * weight)
             }
@@ -382,8 +382,8 @@ impl Instance {
     fn eval_term(&self, term: &Term, witness: &Witness) -> RistrettoPoint {
         let scalar = witness.scalar_val(term.scalar);
         match term.point {
-            GroupTerm::Const(point) => point * scalar,
-            GroupTerm::Var(var, weight) => self.points[var.0] * (scalar * weight),
+            PointTerm::Const(point) => point * scalar,
+            PointTerm::Var(var, weight) => self.points[var.0] * (scalar * weight),
         }
     }
 }
