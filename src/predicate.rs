@@ -1,47 +1,3 @@
-// A predicate is a collection of linear combinations of g_0 = s_1 * g_1 + s_2 * g_2 + ...
-// When building a predicate, the points are all available as are any public scalars.
-// Private scalars make up the witness. The witness is not known when building the predicate, and
-// is never known to the prover.
-//
-// OONI
-//
-// #[derive(Attributes, Clone, Debug)]
-// struct OoniAttributes {
-//     /// A secret key held by the client for the purpose of deriving context-specific pseudonyms.
-//     /// This value is private during issuance, and used during presentation to derive pseudonyms.
-//     #[rkvc(label = "OoniAttributes::pseudonym_key")]
-//     pub pseudonym_key: Scalar,
-//     /// An creation time for the credential. Public and chosen by the server during issuance, and
-//     /// private thereafter. The client must prove during presentation that there credential is at
-//     /// least a certain age.
-//     pub created_at: u64,
-//     /// A count of the number of measurements uploaded by this client. Intialized to zero during
-//     /// issuance and incremented by one for each provided measurement.
-//     pub measurement_count: u64,
-//     /// A bit set to true if the client is a trusted party. Set by the server during presentation,
-//     /// and can be optionally revealed to bypass other predicate checks if true.
-//     pub is_trusted: bool,
-// }
-//
-// Auth predicate (min_age: F, min_measurement_count: F, now: F, pseudonym_ctx: G, pseudonym: G)
-//
-// * Allocate A = AttributeArray<ScalarVar, OoniAttributes>
-// * mac_presentation is valid over A.
-// * A.measurement_count - min_measurement_count >= 0
-// * A.created_at <= now - min_age
-// * pseudonym == A.pseudonym_key * pseudonym_ctx
-
-// In the prover,
-// * the witness values are given during allocation of scalar vars.
-// * points are computed in the course of the predicate and become part of the proof. A point is
-//   allocated when it is contrained to be equal to a linear combinations of previously allocated
-//   point and scalar variables. Any G that is used in a linear combination results in the allocation
-//   of a point.
-//
-// In the verifier,
-// * the witness values are not supplied, so the scalar vars are simply labels.
-// * all point vars have values up-front rather than only at the end.
-
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
@@ -53,6 +9,11 @@ use core::{
 
 use ff::Field;
 use group::Group;
+
+use crate::zkp::{
+    AllocPointVar, AllocScalarVar, CompactProof, ProofError, Prover, SchnorrCS, Transcript,
+    Verifier,
+};
 
 // Alias type for a string that can either be static, or allocated at runtime and owned.
 type Label = Cow<'static, str>;
@@ -169,10 +130,6 @@ struct Relation {
     constraints: Vec<LinearCombination>,
 }
 
-#[non_exhaustive]
-#[derive(Clone, Debug)]
-struct Proof {}
-
 // NOTE: By providing two methods for allocating a point variable, one which must be assigned, and
 // the other than must be equal to a linear combination of point variables, we can ensure by
 // construction that all unassigned point variables can be computed given the witness.
@@ -248,7 +205,7 @@ impl Relation {
         })
     }
 
-    pub fn prove(mut self, witness: &Witness) -> Result<(Instance, Proof), Error> {
+    pub fn prove(mut self, witness: &Witness) -> Result<(Instance, CompactProof), Error> {
         // TODO: Its possible that we could enforce this at compile-time instead.
         if witness.0.len() != self.scalar_count {
             return Err(Error::InvalidWitnessLength {
@@ -340,7 +297,7 @@ struct Instance {
 }
 
 impl Instance {
-    pub fn prove(&self, witness: &Witness) -> Result<Proof, Error> {
+    pub fn prove(&self, witness: &Witness) -> Result<CompactProof, Error> {
         // TODO: Its possible that we could enforce this at compile-time instead.
         if witness.0.len() != self.scalar_count {
             return Err(Error::InvalidWitnessLength {
@@ -349,30 +306,78 @@ impl Instance {
             });
         }
 
-        // Check the constraints, to make sure everything actually works.
-        for (index, constraint) in self.constraints.iter().enumerate() {
-            // Evaluate the terms with assigned points to determine the unassigned point.
-            // NOTE: When proving, this computation duplicates what is done to assign points variables.
-            let eval = constraint
-                .0
-                .iter()
-                .fold(RistrettoPoint::identity(), |value, term| {
-                    value + self.eval_term(term, witness)
-                });
+        // HACK: Translate the constraints into the zkp crate.
+        // FIXME: This is completely broken, in that I need to maintain a mapping between each
+        // ScalarVar and exactly one zkp::ScalarVar.
+        let mut transcript = Transcript::new(b"rkvc::predicate::transcript");
+        let mut prover = Prover::new(b"rkvc::predicate::constraints", &mut transcript);
 
-            if eval != RistrettoPoint::identity() {
-                return Err(Error::ConstraintEvalNotZero { index });
+        let zkp_scalar_vars = witness
+            .0
+            .iter()
+            .map(|scalar| prover.allocate_scalar(b"", *scalar))
+            .collect::<Vec<_>>();
+        for constraint in self.constraints.iter() {
+            let mut rhs = Vec::<(
+                <Prover as SchnorrCS>::ScalarVar,
+                <Prover as SchnorrCS>::PointVar,
+            )>::new();
+            let mut lhs = RistrettoPoint::identity();
+            for term in constraint.0.iter() {
+                let point = match term.point {
+                    PointTerm::Var(var, weight) => self.point_val(var) * weight,
+                    PointTerm::Const(point) => point,
+                };
+                match term.scalar {
+                    Some(scalar_var) => {
+                        let zkp_point_var = prover.alloc_point(("", point)).unwrap();
+                        rhs.push((zkp_scalar_vars[scalar_var.0], zkp_point_var));
+                    }
+                    None => lhs -= point,
+                }
             }
+
+            let zkp_lhs_point_var = prover.alloc_point(("lhs", lhs)).unwrap();
+            prover.constrain(zkp_lhs_point_var, rhs);
         }
 
-        // Obviously not a real proof.
-        Ok(Proof {})
+        Ok(prover.prove_compact())
     }
 
-    pub fn verify(&self, proof: &Proof) -> Result<(), Error> {
-        // LGTM 👌
-        let Proof {} = proof;
-        Ok(())
+    pub fn verify(&self, proof: &CompactProof) -> Result<(), Error> {
+        // HACK: Translate the constraints into the zkp crate.
+        let mut transcript = Transcript::new(b"rkvc::predicate::transcript");
+        let mut verifier = Verifier::new(b"rkvc::predicate::constraints", &mut transcript);
+
+        let zkp_scalar_vars = (0..self.scalar_count)
+            .map(|_| verifier.allocate_scalar(b""))
+            .collect::<Vec<_>>();
+        for constraint in self.constraints.iter() {
+            let mut rhs = Vec::<(
+                <Verifier as SchnorrCS>::ScalarVar,
+                <Verifier as SchnorrCS>::PointVar,
+            )>::new();
+            let mut lhs = RistrettoPoint::identity();
+            for term in constraint.0.iter() {
+                let point = match term.point {
+                    PointTerm::Var(var, weight) => self.point_val(var) * weight,
+                    PointTerm::Const(point) => point,
+                };
+                match term.scalar {
+                    Some(scalar_var) => {
+                        let zkp_point_var = verifier.alloc_point(("", point)).unwrap();
+                        rhs.push((zkp_scalar_vars[scalar_var.0], zkp_point_var));
+                    }
+                    None => lhs -= point,
+                }
+            }
+
+            let zkp_lhs_point_var = verifier.alloc_point(("lhs", lhs)).unwrap();
+            verifier.constrain(zkp_lhs_point_var, rhs);
+        }
+        verifier
+            .verify_compact(proof)
+            .map_err(|e| Error::VerificationError(e))
     }
 
     pub fn point_val(&self, var: PointVar) -> RistrettoPoint {
@@ -414,7 +419,7 @@ impl FromIterator<(ScalarVar, Scalar)> for Witness {
     }
 }
 
-#[derive(Clone, Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 enum Error {
     #[error("point variable with index {index} is unassigned")]
     UnassignedPoint { index: usize },
@@ -422,6 +427,8 @@ enum Error {
     InvalidWitnessLength { expected: usize, received: usize },
     #[error("constraint does not evaluates to non-zero value: {index}")]
     ConstraintEvalNotZero { index: usize },
+    #[error("proof fails to verify: {0}")]
+    VerificationError(#[source] ProofError),
 }
 
 // Relation - contains public points and constants, along with variable points.
@@ -437,8 +444,9 @@ enum Error {
 #[cfg(test)]
 mod tests {
     use curve25519_dalek::{RistrettoPoint, Scalar};
+    use hybrid_array::Array;
 
-    use super::{Error, PointVar, Proof, Relation, ScalarVar, Witness};
+    use super::{CompactProof, Error, PointVar, Relation, ScalarVar, Witness};
 
     /// Example statement constraining two pairs of points to have the same discrete log.
     /// A = x * G && B = x * H
@@ -465,7 +473,7 @@ mod tests {
             Self { rel, x, a, b }
         }
 
-        pub fn prove(self, x: Scalar) -> Result<(DlEqInstance, Proof), Error> {
+        pub fn prove(self, x: Scalar) -> Result<(DlEqInstance, CompactProof), Error> {
             let mut witness = Witness::default();
             witness.assign_scalar(self.x, x);
 
@@ -476,7 +484,11 @@ mod tests {
             Ok((DlEqInstance { a, b }, proof))
         }
 
-        pub fn verify(mut self, instance: &DlEqInstance, proof: &Proof) -> Result<(), Error> {
+        pub fn verify(
+            mut self,
+            instance: &DlEqInstance,
+            proof: &CompactProof,
+        ) -> Result<(), Error> {
             self.rel.assign_point(self.a, instance.a);
             self.rel.assign_point(self.b, instance.b);
             self.rel.into_instance()?.verify(proof)
