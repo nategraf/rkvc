@@ -1,18 +1,12 @@
 #![allow(dead_code)]
-#![allow(unused_imports)]
 
 use alloc::{borrow::Cow, vec, vec::Vec};
-use core::{
-    convert::Infallible,
-    ops::{Add, Div, Mul, Neg, Sub},
-};
+use core::ops::Neg;
 
-use ff::Field;
 use group::Group;
 
 use crate::zkp::{
-    AllocPointVar, AllocScalarVar, CompactProof, ProofError, Prover, SchnorrCS, Transcript,
-    Verifier,
+    AllocPointVar, CompactProof, ProofError, Prover, SchnorrCS, Transcript, Verifier,
 };
 
 // Alias type for a string that can either be static, or allocated at runtime and owned.
@@ -29,16 +23,16 @@ mod ops;
 // https://docs.rs/ghost-cell/latest/src/ghost_cell/ghost_cell.rs.html#533
 
 #[derive(Copy, Clone, Debug)]
-struct ScalarVar(usize);
+pub(crate) struct ScalarVar(usize);
 
 #[derive(Copy, Clone, Debug)]
-struct PointVar(usize);
+pub(crate) struct PointVar(usize);
 
 /// A group element part of a [Term], which can either be a constant in the relation (e.g. a
 /// basepoint for a commitment) or a variable that is part of the instance definition (e.g. a
 /// public key for a signature).
 #[derive(Copy, Clone, Debug)]
-enum PointTerm {
+pub(crate) enum PointTerm {
     /// An instance variable, as an identifier and a constant scalar weight.
     Var(PointVar, Scalar),
     /// A constant point in the relation.
@@ -58,7 +52,7 @@ impl From<PointVar> for PointTerm {
 }
 
 #[derive(Copy, Clone, Debug)]
-struct Term {
+pub(crate) struct Term {
     /// A scalar in the linear combination that is part of the witness (i.e. it is secret to the
     /// prover). If `None`, this indicates that the term does not have an associated secret and
     /// this term only a public point.
@@ -70,7 +64,7 @@ struct Term {
 /// A linear combination of scalar variables (private the prover) and point variables (known to
 /// both parties). If the scalar variable is `None`, it is equivalent to the known constant 1.
 #[derive(Clone, Debug, Default)]
-struct LinearCombination(Vec<Term>);
+pub(crate) struct LinearCombination(Vec<Term>);
 
 impl From<RistrettoPoint> for Term {
     fn from(value: RistrettoPoint) -> Self {
@@ -124,7 +118,7 @@ impl From<PointVar> for LinearCombination {
 }
 
 #[derive(Clone, Debug, Default)]
-struct Relation {
+pub(crate) struct Relation {
     scalar_count: usize,
     points: Vec<Option<RistrettoPoint>>,
     constraints: Vec<LinearCombination>,
@@ -288,7 +282,9 @@ impl Relation {
     }
 }
 
-struct Instance {
+// TODO: Refactor this to look like Witness, simply a Vec<RistrettoPoint> with all the assignments
+// to variable points in the relation.
+pub(crate) struct Instance {
     scalar_count: usize,
     points: Vec<RistrettoPoint>,
     // NOTE: Instead of a LinearCombination, which allows for a weight to be applied to each term,
@@ -375,13 +371,18 @@ impl Instance {
             let zkp_lhs_point_var = verifier.alloc_point(("lhs", lhs)).unwrap();
             verifier.constrain(zkp_lhs_point_var, rhs);
         }
-        verifier
-            .verify_compact(proof)
-            .map_err(|e| Error::VerificationError(e))
+        verifier.verify_compact(proof).map_err(Error::Verification)
     }
 
     pub fn point_val(&self, var: PointVar) -> RistrettoPoint {
         self.points[var.0]
+    }
+
+    pub fn point_vals<I: IntoIterator<Item = PointVar>>(
+        &self,
+        vars: I,
+    ) -> impl Iterator<Item = RistrettoPoint> + use<'_, I> {
+        vars.into_iter().map(|var| self.point_val(var))
     }
 
     fn eval_term(&self, term: &Term, witness: &Witness) -> RistrettoPoint {
@@ -394,7 +395,7 @@ impl Instance {
 }
 
 #[derive(Default, Clone, Debug)]
-struct Witness(Vec<Scalar>);
+pub(crate) struct Witness(Vec<Scalar>);
 
 impl Witness {
     pub fn assign_scalar(&mut self, var: ScalarVar, scalar: impl Into<Scalar>) {
@@ -402,6 +403,12 @@ impl Witness {
             self.0.resize(var.0 + 1, Scalar::ZERO);
         }
         self.0[var.0] = scalar.into();
+    }
+
+    pub fn assign_scalars(&mut self, assignments: impl IntoIterator<Item = (ScalarVar, Scalar)>) {
+        for (var, value) in assignments.into_iter() {
+            self.assign_scalar(var, value);
+        }
     }
 
     fn scalar_val(&self, var: impl Into<Option<ScalarVar>>) -> Scalar {
@@ -420,7 +427,7 @@ impl FromIterator<(ScalarVar, Scalar)> for Witness {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum Error {
+pub(crate) enum Error {
     #[error("point variable with index {index} is unassigned")]
     UnassignedPoint { index: usize },
     #[error("witness length of {received} does not match the expected length for the relation, {expected}")]
@@ -428,23 +435,12 @@ enum Error {
     #[error("constraint does not evaluates to non-zero value: {index}")]
     ConstraintEvalNotZero { index: usize },
     #[error("proof fails to verify: {0}")]
-    VerificationError(#[source] ProofError),
+    Verification(#[source] ProofError),
 }
-
-// Relation - contains public points and constants, along with variable points.
-//  - Has functions to allocate scalars.
-//  - Has functions to allocate points
-//    - What is the point of allocating points? Because we need some way to bridge the gap that
-//      verifiers must assign all points, and provers may assign only those that are not fully
-//      determine by other points.
-//  - Constant points are just provided as instance of G.
-// Instance - A relation with all variable points resolved.
-// Witness - Assignments to all scalar variables.
 
 #[cfg(test)]
 mod tests {
     use curve25519_dalek::{RistrettoPoint, Scalar};
-    use hybrid_array::Array;
 
     use super::{CompactProof, Error, PointVar, Relation, ScalarVar, Witness};
 

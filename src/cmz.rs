@@ -396,117 +396,72 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
     }
 }
 
-// TODO: Is it better to take the scalar vars as an argument, or return them as is done here? The
-// API is not consistent across the board.
-fn constrain_presentation<'a, Msg: AttributeCount>(
-    verifier: &mut Verifier<'a>,
-    u: CompressedRistretto,
-    z: RistrettoPoint,
-    pp: &PublicParameters<CompressedRistretto, Msg>,
-    commit_msg: &Array<CompressedRistretto, Msg::N>,
-) -> Result<AttributeArray<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg>, crate::zkp::ProofError> {
-    // A small macro to construct the labels for variables that get added to the transcript.
-    macro_rules! label {
-        ($s:literal) => {
-            concat!("rkvc::cmz::Mac::presentation::", $s)
-        };
-    }
-    // Allocate variables used in multiple constraint declarations.
-    let g_var = verifier.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
-    let u_var = verifier.alloc_point((label!("u"), u))?;
-    let r_vars: AttributeArray<_, Msg> =
-        verifier.alloc_scalars((0..Msg::N::USIZE).map(|_| label!("r_i")))?;
+use crate::predicate::{
+    Error as PredicateError, LinearCombination, PointVar, Relation, ScalarVar, Witness,
+};
 
-    // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
-    let mut constraint_z = Constraint::new();
-    constraint_z.sum(
-        verifier,
-        r_vars.iter().copied(),
-        pp.1.iter().map(|pp_i| (label!("pp_i"), *pp_i)),
-    )?;
-    constraint_z.add(
-        verifier,
-        label!("-r_v"),
-        (
-            label!("h"),
-            PublicParameters::<RistrettoPoint, Msg>::h().compress(),
-        ),
-    )?;
-    constraint_z.eq(verifier, (label!("z"), z))?;
-
-    // Constrain each C_i = m_i * U + r_i * G
-    let m_vars: AttributeArray<_, Msg> =
-        verifier.alloc_scalars((0..Msg::N::USIZE).map(|_| label!("m_i")))?;
-    for (r_i_var, (m_var, c_i)) in zip_eq(
-        r_vars.as_slice(),
-        zip_eq(m_vars.iter(), commit_msg.as_slice()),
-    ) {
-        let mut constraint_c_i = Constraint::new();
-        constraint_c_i.add(verifier, *m_var, u_var)?;
-        constraint_c_i.add(verifier, *r_i_var, g_var)?;
-        constraint_c_i.eq(verifier, (label!("c_i"), *c_i))?;
-    }
-
-    // Return the m variables to use in further constraints.
-    Ok(m_vars)
+struct CmzPresentationRelation<Msg: AttributeCount> {
+    relation: Relation,
+    z: PointVar,
+    commit_msg: AttributeArray<PointVar, Msg>,
+    r_v: ScalarVar,
+    r_msg: AttributeArray<ScalarVar, Msg>,
+    msg: AttributeArray<ScalarVar, Msg>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn prove_presentation_constraints<'a, Msg>(
-    prover: &mut Prover<'a>,
-    u: RistrettoPoint,
-    r_v: RistrettoScalar,
-    z: RistrettoPoint,
-    r: &Array<RistrettoScalar, Msg::N>,
-    msg: &Array<RistrettoScalar, Msg::N>,
-    pp: &PublicParameters<RistrettoPoint, Msg>,
-    commit_msg: &Array<RistrettoPoint, Msg::N>,
-) -> Result<AttributeArray<<Prover<'a> as SchnorrCS>::ScalarVar, Msg>, Infallible>
-where
-    Msg: AttributeCount,
-{
-    // A small macro to construct the labels for variables that get added to the transcript.
-    macro_rules! label {
-        ($s:literal) => {
-            concat!("rkvc::cmz::Mac::presentation::", $s)
-        };
+impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
+    fn new(u: RistrettoPoint, pp: &PublicParameters<RistrettoPoint, Msg>) -> Self {
+        let mut rel = Relation::default();
+
+        let g = RISTRETTO_BASEPOINT_POINT;
+        let r_msg: AttributeArray<ScalarVar, Msg> = rel.alloc_scalars(Msg::N::USIZE).collect();
+        let r_v = rel.alloc_scalar();
+
+        // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
+        let mut z_constraint = LinearCombination::default();
+        for (r_i, pp_i) in zip_eq(r_msg.iter().copied(), pp.1.iter().copied()) {
+            z_constraint = z_constraint + r_i * pp_i;
+        }
+        z_constraint = z_constraint - r_v * PublicParameters::<RistrettoPoint, Msg>::h();
+        let z = rel.alloc_eq(z_constraint);
+
+        // Constrain each C_i = m_i * U + r_i * G
+        let msg: AttributeArray<ScalarVar, Msg> = rel.alloc_scalars(Msg::N::USIZE).collect();
+        let commit_msg: AttributeArray<PointVar, Msg> = zip_eq(r_msg.as_slice(), msg.as_slice())
+            .map(|(r_i, m_i)| rel.alloc_eq(*m_i * u + *r_i * g))
+            .collect();
+
+        Self {
+            relation: rel,
+            z,
+            commit_msg,
+            r_v,
+            r_msg,
+            msg,
+        }
     }
 
-    // Allocate variables used in multiple constraint declarations.
-    let g_var = prover.alloc_point((label!("g"), RISTRETTO_BASEPOINT_POINT))?;
-    let u_var = prover.alloc_point((label!("u"), u))?;
-    let r_vars: AttributeArray<_, Msg> =
-        prover.alloc_scalars(r.iter().map(|r_i| (label!("r_i"), *r_i)))?;
+    fn prove(
+        self,
+        msg: AttributeArray<RistrettoScalar, Msg>,
+        r_v: ScalarVar,
+        r_msg: AttributeArray<RistrettoScalar, Msg>,
+    ) -> Result<Presentation<RistrettoPoint, Msg>, PredicateError> {
+        let mut witness = Witness::default();
+        witness.assign_scalar(self.r_v, r_v);
+        witness.assign_scalars(zip_eq(self.msg.iter().copied(), msg.iter().copied()));
+        witness.assign_scalars(zip_eq(self.r_msg.iter().copied(), r_msg.iter().copied()));
 
-    // Constrain Z = \Sigma^n_i r_i * X_i - r_v * H
-    let mut constraint_z = Constraint::new();
-    constraint_z.sum(
-        prover,
-        r_vars.iter().copied(),
-        pp.1.iter().map(|pp_i| (label!("pp_i"), *pp_i)),
-    )?;
-    constraint_z.add(
-        prover,
-        (label!("-r_v"), -r_v),
-        (label!("h"), PublicParameters::<RistrettoPoint, Msg>::h()),
-    )?;
-    constraint_z.eq(prover, (label!("z"), z))?;
+        let (instance, proof) = self.relation.prove(&witness)?;
+        let z = instance.point_val(self.z).collect();
+        let commit_msg = instance.point_vals(self.commit_msg.iter().copied()).collect();
 
-    // Constrain each C_i = m_i * U + r_i * G
-    let m_vars: AttributeArray<_, Msg> =
-        prover.alloc_scalars(msg.iter().map(|m_i| (label!("m_i"), *m_i)))?;
-    let iter = zip_eq(
-        zip_eq(m_vars.as_slice(), r_vars.as_slice()),
-        commit_msg.as_slice(),
-    );
-    for ((m_i, r_i_var), c_i) in iter {
-        let mut constraint_c_i = Constraint::new();
-        constraint_c_i.add(prover, *m_i, u_var)?;
-        constraint_c_i.add(prover, *r_i_var, g_var)?;
-        constraint_c_i.eq(prover, (label!("c_i"), *c_i))?;
+        Ok(Presentation
     }
 
-    Ok(m_vars)
+    fn verify(&self, z: RistrettoPoint, commit_msg: AttributeArray<RistrettoPoint, Msg>) -> ! {
+        todo!()
+    }
 }
 
 #[cfg(test)]

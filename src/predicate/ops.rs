@@ -1,5 +1,4 @@
-use alloc::{vec, vec::Vec};
-use core::ops::{Add, Div, Mul, Neg, Sub};
+use core::ops::{Add, Mul, Neg, Sub};
 
 use super::{LinearCombination, PointTerm, PointVar, Scalar, ScalarVar, Term};
 use curve25519_dalek::RistrettoPoint;
