@@ -91,7 +91,7 @@ where
 /// Labels for each field in the implementing type's [Attributes] encoding.
 ///
 /// Labels are used in cryptographic protocols as unique identifiers for the fields. As examples,
-/// the [PedersonCommitment][crate::pederson::PedersonCommitment] implementation uses the labels as
+/// the [PedersenCommitment][crate::pedersen::PedersenCommitment] implementation uses the labels as
 /// hash-to-curve input to create commitment generators, and the [zkp][crate::zkp] module uses them
 /// as domain separators in the Fiat-Shamir transcript.
 pub trait AttributeLabels: AttributeCount {

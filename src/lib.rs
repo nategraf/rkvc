@@ -17,7 +17,7 @@ pub use attributes::{
 
 pub mod cmz;
 pub mod hash;
-pub mod pederson;
+pub mod pedersen;
 mod predicate;
 pub mod range;
 pub mod zkp;
