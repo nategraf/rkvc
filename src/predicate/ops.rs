@@ -1,14 +1,45 @@
 use alloc::{vec, vec::Vec};
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-use super::{LinearCombination, PointVar, Scalar, ScalarVar, Term};
+use super::{GroupTerm, LinearCombination, PointVar, Scalar, ScalarVar, Term};
+use curve25519_dalek::RistrettoPoint;
+
+impl Neg for GroupTerm {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        match self {
+            Self::Var(var, weight) => Self::Var(var, -weight),
+            Self::Const(value) => Self::Const(-value),
+        }
+    }
+}
+
+impl Mul<Scalar> for GroupTerm {
+    type Output = Self;
+
+    fn mul(self, rhs: Scalar) -> Self::Output {
+        match self {
+            Self::Var(var, weight) => Self::Var(var, weight * rhs),
+            Self::Const(value) => Self::Const(value * rhs),
+        }
+    }
+}
+
+impl Mul<GroupTerm> for Scalar {
+    type Output = GroupTerm;
+
+    fn mul(self, rhs: GroupTerm) -> Self::Output {
+        rhs * self
+    }
+}
 
 impl Neg for Term {
     type Output = Self;
 
     fn neg(self) -> Self {
         Self {
-            weight: -self.weight,
+            point: -self.point,
             ..self
         }
     }
@@ -18,11 +49,7 @@ impl Neg for PointVar {
     type Output = Term;
 
     fn neg(self) -> Term {
-        Term {
-            weight: -Scalar::ONE,
-            point: self,
-            scalar: None,
-        }
+        GroupTerm::Var(self, -Scalar::ONE).into()
     }
 }
 
@@ -173,7 +200,7 @@ impl Mul<Scalar> for Term {
 
     fn mul(self, rhs: Scalar) -> Self {
         Self {
-            weight: self.weight * rhs,
+            point: self.point * rhs,
             ..self
         }
     }
@@ -192,8 +219,7 @@ impl Mul<Scalar> for PointVar {
 
     fn mul(self, rhs: Scalar) -> Term {
         Term {
-            point: self,
-            weight: rhs,
+            point: GroupTerm::Var(self, rhs),
             scalar: None,
         }
     }
@@ -232,8 +258,7 @@ impl Mul<ScalarVar> for PointVar {
     fn mul(self, rhs: ScalarVar) -> Term {
         Term {
             scalar: Some(rhs),
-            point: self,
-            weight: Scalar::ONE,
+            point: self.into(),
         }
     }
 }
@@ -242,6 +267,25 @@ impl Mul<PointVar> for ScalarVar {
     type Output = Term;
 
     fn mul(self, rhs: PointVar) -> Term {
+        rhs * self
+    }
+}
+
+impl Mul<ScalarVar> for RistrettoPoint {
+    type Output = Term;
+
+    fn mul(self, rhs: ScalarVar) -> Term {
+        Term {
+            scalar: Some(rhs),
+            point: self.into(),
+        }
+    }
+}
+
+impl Mul<RistrettoPoint> for ScalarVar {
+    type Output = Term;
+
+    fn mul(self, rhs: RistrettoPoint) -> Term {
         rhs * self
     }
 }

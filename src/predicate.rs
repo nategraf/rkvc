@@ -73,20 +73,37 @@ struct ScalarVar(usize);
 #[derive(Copy, Clone, Debug)]
 struct PointVar(usize);
 
+/// A group element part of a [Term], which can either be a constant in the relation (e.g. a
+/// basepoint for a commitment) or a variable that is part of the instance definition (e.g. a
+/// public key for a signature).
+#[derive(Copy, Clone, Debug)]
+enum GroupTerm {
+    /// An instance variable, as an identifier and a constant scalar weight.
+    Var(PointVar, Scalar),
+    /// A constant point in the relation.
+    Const(RistrettoPoint),
+}
+
+impl From<RistrettoPoint> for GroupTerm {
+    fn from(value: RistrettoPoint) -> Self {
+        Self::Const(value)
+    }
+}
+
+impl From<PointVar> for GroupTerm {
+    fn from(var: PointVar) -> Self {
+        Self::Var(var, Scalar::ONE)
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 struct Term {
     /// A scalar in the linear combination that is part of the witness (i.e. it is secret to the
     /// prover). If `None`, this indicates that the term does not have an associated secret and
     /// this term only a public point.
     scalar: Option<ScalarVar>,
-    /// A point in the linear combination that is part of the instance.
-    point: PointVar,
-    /// A constant multiplicative factor applied to the term.
-    ///
-    /// In a relation, this is a public constant that is part of the relation's definition. When
-    /// constructing a witness of the relation, it is folded into the point value which is known at
-    /// that time.
-    weight: Scalar,
+    /// The group element part of a term in a [LinearCombination].
+    point: GroupTerm,
 }
 
 /// A linear combination of scalar variables (private the prover) and point variables (known to
@@ -94,12 +111,29 @@ struct Term {
 #[derive(Clone, Debug, Default)]
 struct LinearCombination(Vec<Term>);
 
+impl From<RistrettoPoint> for Term {
+    fn from(value: RistrettoPoint) -> Self {
+        Self {
+            scalar: None,
+            point: value.into(),
+        }
+    }
+}
+
 impl From<PointVar> for Term {
     fn from(var: PointVar) -> Self {
         Self {
             scalar: None,
-            point: var,
-            weight: Scalar::ONE,
+            point: var.into(),
+        }
+    }
+}
+
+impl From<GroupTerm> for Term {
+    fn from(value: GroupTerm) -> Self {
+        Self {
+            scalar: None,
+            point: value,
         }
     }
 }
@@ -153,18 +187,6 @@ impl Relation {
         count: usize,
     ) -> impl ExactSizeIterator<Item = ScalarVar> + use<'_> {
         (0..count).map(|_| self.alloc_scalar())
-    }
-
-    pub fn alloc_point(&mut self, point: RistrettoPoint) -> PointVar {
-        self.points.push(Some(point));
-        PointVar(self.points.len() - 1)
-    }
-
-    pub fn alloc_points<T>(&mut self, points: T) -> impl Iterator<Item = PointVar> + use<'_, T>
-    where
-        T: IntoIterator<Item = RistrettoPoint>,
-    {
-        points.into_iter().map(|point| self.alloc_point(point))
     }
 
     pub fn constrain_zero(&mut self, linear_combination: impl Into<LinearCombination>) {
@@ -235,42 +257,31 @@ impl Relation {
             });
         }
 
-        // Solve for the unassigned point variables.
-        // NOTE: In the current implementation, we make utilize an invariant created by the
-        // construction of `alloc_point` and `alloc_eq`, such that all points are "determined".
-        // *) Assigned points are determined. Any point that is constrained to be equal to a linear
-        // combination of determined points is determined.
-        // A) In a new relation, there are no point variables. As a result, all point variables are
-        // trivially determined.
-        // B) When calling `alloc_point`, the point is assigned and therefore determined. If all
-        // points in the relation are determined before the call to `alloc_point`, all points
-        // including the new point variable are determined after.
-        // C) When calling `alloc_point`, a single new unassigned point is created. It is set equal
-        // to a linear combination of previously created points in the relation. Therefore if all
-        // points were determined before the call to `alloc_eq`, they will be after.
-        //
-        // Additionally, we are able to resolve the point variables by looping through the
-        // constraints in the order that they are listed. Each constraint can introduce at most one
-        // unassigned point variable, which must be determined by the previously allocated point
-        // variables.
         for constraint in self.constraints.iter() {
             // Split the constraints into those with assigned and unassigned points.
             let unassigned_points = constraint
                 .0
                 .iter()
-                .filter(|term| self.points[term.point.0].is_none())
+                .filter(|term| !self.is_term_assigned(term))
                 .map(|term| {
+                    let Term {
+                        scalar,
+                        point: GroupTerm::Var(var, weight),
+                    } = term
+                    else {
+                        panic!("invariant check failed: constant is not assigned")
+                    };
                     // alloc_eq should only create terms with weight of one and no scalar var.
                     assert_eq!(
-                        term.weight,
+                        *weight,
                         Scalar::ONE,
                         "invariant check failed: non-unit weight"
                     );
                     assert!(
-                        term.scalar.is_none(),
+                        scalar.is_none(),
                         "invariant check failed: scalar var is not none"
                     );
-                    term.point
+                    var
                 })
                 .collect::<Vec<_>>();
 
@@ -288,15 +299,10 @@ impl Relation {
             self.points[unassigned_point.0] = constraint
                 .0
                 .iter()
-                .filter_map(|term| {
-                    self.points[term.point.0].map(|point| (term.scalar, term.weight, point))
+                .filter(|term| self.is_term_assigned(term))
+                .fold(RistrettoPoint::identity(), |value, term| {
+                    value + self.eval_term(term, witness).unwrap()
                 })
-                .fold(
-                    RistrettoPoint::identity(),
-                    |value, (scalar_var, weight, point)| {
-                        value + (witness.scalar_val(scalar_var) * weight) * point
-                    },
-                )
                 .neg()
                 .into();
         }
@@ -304,6 +310,24 @@ impl Relation {
         let instance = self.into_instance().expect("all points should be assigned");
         let proof = instance.prove(witness)?;
         Ok((instance, proof))
+    }
+
+    fn is_term_assigned(&self, term: &Term) -> bool {
+        match term.point {
+            GroupTerm::Const(_) => true,
+            GroupTerm::Var(var, _) => self.points[var.0].is_some(),
+        }
+    }
+
+    fn eval_term(&self, term: &Term, witness: &Witness) -> Result<RistrettoPoint, Error> {
+        let scalar = witness.scalar_val(term.scalar);
+        Ok(match term.point {
+            GroupTerm::Const(point) => point * scalar,
+            GroupTerm::Var(var, weight) => {
+                self.points[var.0].ok_or(Error::UnassignedPoint { index: var.0 })?
+                    * (scalar * weight)
+            }
+        })
     }
 }
 
@@ -333,9 +357,7 @@ impl Instance {
                 .0
                 .iter()
                 .fold(RistrettoPoint::identity(), |value, term| {
-                    value
-                        + (witness.scalar_val(term.scalar) * term.weight)
-                            * self.points[term.point.0]
+                    value + self.eval_term(term, witness)
                 });
 
             if eval != RistrettoPoint::identity() {
@@ -355,6 +377,14 @@ impl Instance {
 
     pub fn point_val(&self, var: PointVar) -> RistrettoPoint {
         self.points[var.0]
+    }
+
+    fn eval_term(&self, term: &Term, witness: &Witness) -> RistrettoPoint {
+        let scalar = witness.scalar_val(term.scalar);
+        match term.point {
+            GroupTerm::Const(point) => point * scalar,
+            GroupTerm::Var(var, weight) => self.points[var.0] * (scalar * weight),
+        }
     }
 }
 
@@ -428,10 +458,9 @@ mod tests {
         pub fn new(g: RistrettoPoint, h: RistrettoPoint) -> Self {
             let mut rel = Relation::default();
             let x = rel.alloc_scalar();
-            let (g_var, h_var) = (rel.alloc_point(g), rel.alloc_point(h));
 
-            let a = rel.alloc_eq(x * g_var);
-            let b = rel.alloc_eq(x * h_var);
+            let a = rel.alloc_eq(x * g);
+            let b = rel.alloc_eq(x * h);
 
             Self { rel, x, a, b }
         }
