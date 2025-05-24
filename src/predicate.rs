@@ -119,8 +119,8 @@ impl From<PointVar> for LinearCombination {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Relation {
-    scalar_count: usize,
-    points: Vec<Option<RistrettoPoint>>,
+    scalar_var_count: usize,
+    point_var_count: usize,
     constraints: Vec<LinearCombination>,
 }
 
@@ -129,8 +129,8 @@ pub(crate) struct Relation {
 // construction that all unassigned point variables can be computed given the witness.
 impl Relation {
     pub fn alloc_scalar(&mut self) -> ScalarVar {
-        self.scalar_count += 1;
-        ScalarVar(self.scalar_count - 1)
+        self.scalar_var_count += 1;
+        ScalarVar(self.scalar_var_count - 1)
     }
 
     pub fn alloc_scalars(
@@ -155,65 +155,39 @@ impl Relation {
         self.constrain_zero(lhs.into() - rhs.into());
     }
 
+    // NOTE: Intentionally private for now.
+    fn alloc_point(&mut self) -> PointVar {
+        self.point_var_count += 1;
+        PointVar(self.point_var_count - 1)
+    }
+
     pub fn alloc_eq(&mut self, linear_combination: impl Into<LinearCombination>) -> PointVar {
         // Allocate an unassigned point
         // NOTE: It would be possible here for the caller to pass a linear_combination that has no
         // scalar vars and has all points assigned. In which case, we can simply assign this point.
-        self.points.push(None);
-        let point_var = PointVar(self.points.len() - 1);
+        let point_var = self.alloc_point();
 
         // Constraint the newly allocated point to be equal to the linear combination.
         self.constrain_eq(point_var, linear_combination);
         point_var
     }
 
-    // TODO: Does it make sense to have this here versus making this some kind of intermediate step
-    // towards making an Instance? The idea with this function is that only the verifier would call
-    // it, as the prover instead provides a Witness, and the unassigned points get calculated from
-    // that.
-    pub fn assign_point(&mut self, var: PointVar, value: RistrettoPoint) {
-        match self.points[var.0] {
-            Some(assignment) => {
-                assert_eq!(
-                    assignment, value,
-                    "attempted to assign a point variable twice with distinct values"
-                )
-            }
-            None => self.points[var.0] = Some(value),
-        }
-    }
-
-    /// Convert the [Relation] into an [Instance], checking that all point variables are assigned.
-    pub fn into_instance(self) -> Result<Instance, Error> {
-        let points = self
-            .points
-            .into_iter()
-            .enumerate()
-            .map(|(index, point)| point.ok_or(Error::UnassignedPoint { index }))
-            .collect::<Result<_, _>>()?;
-
-        Ok(Instance {
-            points,
-            scalar_count: self.scalar_count,
-            constraints: self.constraints,
-        })
-    }
-
-    pub fn prove(mut self, witness: &Witness) -> Result<(Instance, CompactProof), Error> {
+    pub fn prove(&self, witness: &Witness) -> Result<(Instance, CompactProof), Error> {
         // TODO: Its possible that we could enforce this at compile-time instead.
-        if witness.0.len() != self.scalar_count {
+        if witness.0.len() != self.scalar_var_count {
             return Err(Error::InvalidWitnessLength {
-                expected: self.scalar_count,
+                expected: self.scalar_var_count,
                 received: witness.0.len(),
             });
         }
 
+        let mut instance = Instance::default();
         for constraint in self.constraints.iter() {
             // Split the constraints into those with assigned and unassigned points.
             let unassigned_points = constraint
                 .0
                 .iter()
-                .filter(|term| !self.is_term_assigned(term))
+                .filter(|term| !self.is_term_assigned(&instance, term))
                 .map(|term| {
                     let Term {
                         scalar,
@@ -247,71 +221,27 @@ impl Relation {
 
             // Evaluate the terms with assigned points to determine the unassigned point.
             // NOTE: Could be optimized by using a proper MSM.
-            self.points[unassigned_point.0] = constraint
-                .0
-                .iter()
-                .filter(|term| self.is_term_assigned(term))
-                .fold(RistrettoPoint::identity(), |value, term| {
-                    value + self.eval_term(term, witness).unwrap()
-                })
-                .neg()
-                .into();
-        }
-
-        let instance = self.into_instance().expect("all points should be assigned");
-        let proof = instance.prove(witness)?;
-        Ok((instance, proof))
-    }
-
-    fn is_term_assigned(&self, term: &Term) -> bool {
-        match term.point {
-            PointTerm::Const(_) => true,
-            PointTerm::Var(var, _) => self.points[var.0].is_some(),
-        }
-    }
-
-    fn eval_term(&self, term: &Term, witness: &Witness) -> Result<RistrettoPoint, Error> {
-        let scalar = witness.scalar_val(term.scalar);
-        Ok(match term.point {
-            PointTerm::Const(point) => point * scalar,
-            PointTerm::Var(var, weight) => {
-                self.points[var.0].ok_or(Error::UnassignedPoint { index: var.0 })?
-                    * (scalar * weight)
-            }
-        })
-    }
-}
-
-// TODO: Refactor this to look like Witness, simply a Vec<RistrettoPoint> with all the assignments
-// to variable points in the relation.
-pub(crate) struct Instance {
-    scalar_count: usize,
-    points: Vec<RistrettoPoint>,
-    // NOTE: Instead of a LinearCombination, which allows for a weight to be applied to each term,
-    // this could simply be Vec<Vec<(ScalarVar, G)>> which would allow dropping the points vec.
-    constraints: Vec<LinearCombination>,
-}
-
-impl Instance {
-    pub fn prove(&self, witness: &Witness) -> Result<CompactProof, Error> {
-        // TODO: Its possible that we could enforce this at compile-time instead.
-        if witness.0.len() != self.scalar_count {
-            return Err(Error::InvalidWitnessLength {
-                expected: self.scalar_count,
-                received: witness.0.len(),
-            });
+            instance.assign_point(
+                *unassigned_point,
+                constraint
+                    .0
+                    .iter()
+                    .filter(|term| self.is_term_assigned(&instance, term))
+                    .fold(RistrettoPoint::identity(), |value, term| {
+                        value + instance.eval_term(term, witness)
+                    })
+                    .neg(),
+            );
         }
 
         // HACK: Translate the constraints into the zkp crate.
-        // FIXME: This is completely broken, in that I need to maintain a mapping between each
-        // ScalarVar and exactly one zkp::ScalarVar.
         let mut transcript = Transcript::new(b"rkvc::predicate::transcript");
         let mut prover = Prover::new(b"rkvc::predicate::constraints", &mut transcript);
 
         let zkp_scalar_vars = witness
             .0
             .iter()
-            .map(|scalar| prover.allocate_scalar(b"", *scalar))
+            .map(|scalar| prover.allocate_scalar(b"", scalar.expect("unassigned scalar")))
             .collect::<Vec<_>>();
         for constraint in self.constraints.iter() {
             let mut rhs = Vec::<(
@@ -321,7 +251,7 @@ impl Instance {
             let mut lhs = RistrettoPoint::identity();
             for term in constraint.0.iter() {
                 let point = match term.point {
-                    PointTerm::Var(var, weight) => self.point_val(var) * weight,
+                    PointTerm::Var(var, weight) => instance.point_val(var) * weight,
                     PointTerm::Const(point) => point,
                 };
                 match term.scalar {
@@ -337,15 +267,15 @@ impl Instance {
             prover.constrain(zkp_lhs_point_var, rhs);
         }
 
-        Ok(prover.prove_compact())
+        Ok((instance, prover.prove_compact()))
     }
 
-    pub fn verify(&self, proof: &CompactProof) -> Result<(), Error> {
+    pub fn verify(&self, instance: &Instance, proof: &CompactProof) -> Result<(), Error> {
         // HACK: Translate the constraints into the zkp crate.
         let mut transcript = Transcript::new(b"rkvc::predicate::transcript");
         let mut verifier = Verifier::new(b"rkvc::predicate::constraints", &mut transcript);
 
-        let zkp_scalar_vars = (0..self.scalar_count)
+        let zkp_scalar_vars = (0..self.scalar_var_count)
             .map(|_| verifier.allocate_scalar(b""))
             .collect::<Vec<_>>();
         for constraint in self.constraints.iter() {
@@ -356,7 +286,7 @@ impl Instance {
             let mut lhs = RistrettoPoint::identity();
             for term in constraint.0.iter() {
                 let point = match term.point {
-                    PointTerm::Var(var, weight) => self.point_val(var) * weight,
+                    PointTerm::Var(var, weight) => instance.point_val(var) * weight,
                     PointTerm::Const(point) => point,
                 };
                 match term.scalar {
@@ -374,8 +304,36 @@ impl Instance {
         verifier.verify_compact(proof).map_err(Error::Verification)
     }
 
+    fn is_term_assigned(&self, instance: &Instance, term: &Term) -> bool {
+        match term.point {
+            PointTerm::Const(_) => true,
+            PointTerm::Var(var, _) => instance.0[var.0].is_some(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Instance(Vec<Option<RistrettoPoint>>);
+
+impl Instance {
+    pub fn assign_point(&mut self, var: PointVar, point: RistrettoPoint) {
+        if self.0.len() <= var.0 {
+            self.0.resize(var.0 + 1, None);
+        }
+        self.0[var.0] = Some(point);
+    }
+
+    pub fn assign_points(
+        &mut self,
+        assignments: impl IntoIterator<Item = (PointVar, RistrettoPoint)>,
+    ) {
+        for (var, value) in assignments.into_iter() {
+            self.assign_point(var, value);
+        }
+    }
+
     pub fn point_val(&self, var: PointVar) -> RistrettoPoint {
-        self.points[var.0]
+        self.0[var.0].unwrap_or_else(|| panic!("unassigned point var with index {}", var.0))
     }
 
     pub fn point_vals<I: IntoIterator<Item = PointVar>>(
@@ -389,20 +347,20 @@ impl Instance {
         let scalar = witness.scalar_val(term.scalar);
         match term.point {
             PointTerm::Const(point) => point * scalar,
-            PointTerm::Var(var, weight) => self.points[var.0] * (scalar * weight),
+            PointTerm::Var(var, weight) => self.point_val(var) * (scalar * weight),
         }
     }
 }
 
 #[derive(Default, Clone, Debug)]
-pub(crate) struct Witness(Vec<Scalar>);
+pub(crate) struct Witness(Vec<Option<Scalar>>);
 
 impl Witness {
     pub fn assign_scalar(&mut self, var: ScalarVar, scalar: impl Into<Scalar>) {
         if self.0.len() <= var.0 {
-            self.0.resize(var.0 + 1, Scalar::ZERO);
+            self.0.resize(var.0 + 1, None);
         }
-        self.0[var.0] = scalar.into();
+        self.0[var.0] = Some(scalar.into());
     }
 
     pub fn assign_scalars(&mut self, assignments: impl IntoIterator<Item = (ScalarVar, Scalar)>) {
@@ -412,7 +370,13 @@ impl Witness {
     }
 
     fn scalar_val(&self, var: impl Into<Option<ScalarVar>>) -> Scalar {
-        var.into().map(|var| self.0[var.0]).unwrap_or(Scalar::ONE)
+        // TODO: Should this be a panic, or an error?
+        var.into()
+            .map(|var| {
+                self.0[var.0]
+                    .unwrap_or_else(|| panic!("unassigned scalar var with index {}", var.0))
+            })
+            .unwrap_or(Scalar::ONE)
     }
 }
 
@@ -442,7 +406,7 @@ pub(crate) enum Error {
 mod tests {
     use curve25519_dalek::{RistrettoPoint, Scalar};
 
-    use super::{CompactProof, Error, PointVar, Relation, ScalarVar, Witness};
+    use super::{CompactProof, Error, Instance, PointVar, Relation, ScalarVar, Witness};
 
     /// Example statement constraining two pairs of points to have the same discrete log.
     /// A = x * G && B = x * H
@@ -451,11 +415,6 @@ mod tests {
         pub x: ScalarVar,
         pub a: PointVar,
         pub b: PointVar,
-    }
-
-    struct DlEqInstance {
-        pub a: RistrettoPoint,
-        pub b: RistrettoPoint,
     }
 
     impl DlEqRelation {
@@ -469,7 +428,10 @@ mod tests {
             Self { rel, x, a, b }
         }
 
-        pub fn prove(self, x: Scalar) -> Result<(DlEqInstance, CompactProof), Error> {
+        pub fn prove(
+            &self,
+            x: Scalar,
+        ) -> Result<(RistrettoPoint, RistrettoPoint, CompactProof), Error> {
             let mut witness = Witness::default();
             witness.assign_scalar(self.x, x);
 
@@ -477,17 +439,20 @@ mod tests {
             let a = instance.point_val(self.a);
             let b = instance.point_val(self.b);
 
-            Ok((DlEqInstance { a, b }, proof))
+            Ok((a, b, proof))
         }
 
         pub fn verify(
-            mut self,
-            instance: &DlEqInstance,
+            &self,
+            a: RistrettoPoint,
+            b: RistrettoPoint,
             proof: &CompactProof,
         ) -> Result<(), Error> {
-            self.rel.assign_point(self.a, instance.a);
-            self.rel.assign_point(self.b, instance.b);
-            self.rel.into_instance()?.verify(proof)
+            let mut instance = Instance::default();
+            instance.assign_point(self.a, a);
+            instance.assign_point(self.b, b);
+
+            self.rel.verify(&instance, proof)
         }
     }
 
@@ -496,17 +461,17 @@ mod tests {
         let g = RistrettoPoint::random(&mut rand::thread_rng());
         let h = RistrettoPoint::random(&mut rand::thread_rng());
 
-        let (instance, proof) = {
+        let (a, b, proof) = {
             let relation = DlEqRelation::new(g, h);
 
             let x = Scalar::random(&mut rand::thread_rng());
-            let (instance, proof) = relation.prove(x).unwrap();
+            let (a, b, proof) = relation.prove(x).unwrap();
 
-            (instance, proof)
+            (a, b, proof)
         };
 
         let relation = DlEqRelation::new(g, h);
-        relation.verify(&instance, &proof).unwrap();
+        relation.verify(a, b, &proof).unwrap();
 
         // This is where the verifier might use (a, b) from the instance/message.
     }
