@@ -18,6 +18,10 @@ use typenum::Unsigned;
 use crate::{
     attributes::{AttributeArray, AttributeCount, Attributes, IdentityEncoder, UintEncoder},
     pedersen::{PedersenCommitment, PedersenGenerators},
+    predicate::{
+        Error as PredicateError, Instance, LinearCombination, PointVar, Relation, ScalarVar,
+        Witness,
+    },
     zkp::{
         AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover, SchnorrCS,
         Transcript, Verifier,
@@ -178,8 +182,7 @@ where
     // proof of because the fields were set by the issuer.
     //
     // Perhaps I should return a commitment here, as an indication that they should be checking
-    // this commitment. Main issue with this is that the presentation includes a SchnorrProof and
-    // already, and doing anything useful with the commit would require further binding it.
+    // this commitment.
     pub fn verify_presentation(
         &self,
         pres: &Presentation<CompressedRistretto, Msg>,
@@ -196,42 +199,6 @@ where
         self.constrain_presentation(&mut verifier, pres)?;
         verifier.verify_compact(proof)?;
         Ok(())
-    }
-
-    // NOTE: This function exists as a partial answer to the comments above on the Identity
-    // trait bound for Msg. TODO: Should it be moved as a member of the presentation.
-    pub fn constrain_presentation<'a>(
-        &self,
-        verifier: &mut Verifier<'a>,
-        pres: &Presentation<CompressedRistretto, Msg>,
-    ) -> Result<AttributeArray<<Verifier<'a> as SchnorrCS>::ScalarVar, Msg>, Error> {
-        let u = pres.u.decompress().ok_or(Error::DecompressFailed)?;
-        // NOTE: Unwrapping the CtChoice is ok here because U is non-private.
-        if u.is_identity().into() {
-            return Err(Error::VerificationFailed);
-        }
-        let commit_v = pres.commit_v.decompress().ok_or(Error::DecompressFailed)?;
-
-        // Calculate Z = x_0 * U + \Sigma_i x_i * C_i - C_v
-        let z = u.mul(self.0) - commit_v
-            + zip_eq(self.1.as_slice(), pres.commit_msg.as_slice())
-                .map(|(x_i, c_i)| {
-                    c_i.decompress()
-                        .ok_or(Error::DecompressFailed)
-                        .map(|c_i| c_i.mul(x_i))
-                })
-                .collect::<Result<Array<_, Msg::N>, _>>()?
-                .into_iter()
-                .sum::<RistrettoPoint>();
-
-        let m_vars = constrain_presentation(
-            verifier,
-            pres.u,
-            z,
-            &self.public_parameters().compress(),
-            &pres.commit_msg,
-        )?;
-        Ok(m_vars)
     }
 }
 
@@ -396,12 +363,9 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
     }
 }
 
-use crate::predicate::{
-    Error as PredicateError, LinearCombination, PointVar, Relation, ScalarVar, Witness,
-};
-
 struct CmzPresentationRelation<Msg: AttributeCount> {
     relation: Relation,
+    u: RistrettoPoint,
     z: PointVar,
     commit_msg: AttributeArray<PointVar, Msg>,
     r_v: ScalarVar,
@@ -433,6 +397,7 @@ impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
 
         Self {
             relation: rel,
+            u,
             z,
             commit_msg,
             r_v,
@@ -443,8 +408,9 @@ impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
 
     fn prove(
         self,
+        v: RistrettoPoint,
         msg: AttributeArray<RistrettoScalar, Msg>,
-        r_v: ScalarVar,
+        r_v: RistrettoScalar,
         r_msg: AttributeArray<RistrettoScalar, Msg>,
     ) -> Result<Presentation<RistrettoPoint, Msg>, PredicateError> {
         let mut witness = Witness::default();
@@ -453,14 +419,41 @@ impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
         witness.assign_scalars(zip_eq(self.r_msg.iter().copied(), r_msg.iter().copied()));
 
         let (instance, proof) = self.relation.prove(&witness)?;
-        let z = instance.point_val(self.z).collect();
-        let commit_msg = instance.point_vals(self.commit_msg.iter().copied()).collect();
+        let z = instance.point_val(self.z);
+        let commit_msg = instance
+            .point_vals(self.commit_msg.iter().copied())
+            .collect();
 
-        Ok(Presentation
+        Ok(Presentation {
+            commit_msg,
+            u: self.u,
+            // NOTE: r_v * H gets computed twice here since there is no notion of a secret point
+            // variable in the system right now.
+            commit_v: v + r_v * PublicParameters::<RistrettoPoint, Msg>::h(),
+            proof,
+        })
     }
 
-    fn verify(&self, z: RistrettoPoint, commit_msg: AttributeArray<RistrettoPoint, Msg>) -> ! {
-        todo!()
+    fn verify(
+        &self,
+        key: &Key<RistrettoScalar, Msg>,
+        presentation: &Presentation<RistrettoPoint, Msg>,
+    ) -> Result<(), PredicateError> {
+        // Calculate Z = x_0 * U + \Sigma_i x_i * C_i - C_v
+        let z = self.u.mul(key.0)
+            + zip_eq(key.1.as_slice(), presentation.commit_msg.as_slice())
+                .map(|(x_i, c_i)| c_i.mul(x_i))
+                .sum::<RistrettoPoint>()
+            - presentation.commit_v;
+
+        let mut instance = Instance::default();
+        instance.assign_point(self.z, z);
+        instance.assign_points(zip_eq(
+            self.commit_msg.0.clone(),
+            presentation.commit_msg.0.clone(),
+        ));
+
+        self.relation.verify(&instance, presentation.proof)
     }
 }
 

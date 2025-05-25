@@ -172,7 +172,7 @@ impl Relation {
         point_var
     }
 
-    pub fn prove(&self, witness: &Witness) -> Result<(Instance, CompactProof), Error> {
+    pub fn compute_instance(&self, witness: &Witness) -> Result<Instance, Error> {
         // TODO: Its possible that we could enforce this at compile-time instead.
         if witness.0.len() != self.scalar_var_count {
             return Err(Error::InvalidWitnessLength {
@@ -233,6 +233,19 @@ impl Relation {
                     .neg(),
             );
         }
+        Ok(instance)
+    }
+
+    pub fn prove(&self, witness: &Witness) -> Result<(Instance, CompactProof), Error> {
+        // TODO: Its possible that we could enforce this at compile-time instead.
+        if witness.0.len() != self.scalar_var_count {
+            return Err(Error::InvalidWitnessLength {
+                expected: self.scalar_var_count,
+                received: witness.0.len(),
+            });
+        }
+
+        let instance = self.compute_instance(witness)?;
 
         // HACK: Translate the constraints into the zkp crate.
         let mut transcript = Transcript::new(b"rkvc::predicate::transcript");
