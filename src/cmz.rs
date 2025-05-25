@@ -364,7 +364,6 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
 }
 
 struct CmzPresentationRelation<Msg: AttributeCount> {
-    relation: Relation,
     u: RistrettoPoint,
     z: PointVar,
     commit_msg: AttributeArray<PointVar, Msg>,
@@ -374,9 +373,11 @@ struct CmzPresentationRelation<Msg: AttributeCount> {
 }
 
 impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
-    fn new(u: RistrettoPoint, pp: &PublicParameters<RistrettoPoint, Msg>) -> Self {
-        let mut rel = Relation::default();
-
+    fn constrain(
+        rel: &mut Relation,
+        u: RistrettoPoint,
+        pp: &PublicParameters<RistrettoPoint, Msg>,
+    ) -> Self {
         let g = RISTRETTO_BASEPOINT_POINT;
         let r_msg: AttributeArray<ScalarVar, Msg> = rel.alloc_scalars(Msg::N::USIZE).collect();
         let r_v = rel.alloc_scalar();
@@ -396,7 +397,6 @@ impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
             .collect();
 
         Self {
-            relation: rel,
             u,
             z,
             commit_msg,
@@ -406,39 +406,43 @@ impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
         }
     }
 
-    fn prove(
-        self,
-        v: RistrettoPoint,
+    fn assign_witness(
+        &self,
+        witness: &mut Witness,
         msg: AttributeArray<RistrettoScalar, Msg>,
         r_v: RistrettoScalar,
         r_msg: AttributeArray<RistrettoScalar, Msg>,
-    ) -> Result<Presentation<RistrettoPoint, Msg>, PredicateError> {
-        let mut witness = Witness::default();
+    ) {
         witness.assign_scalar(self.r_v, r_v);
         witness.assign_scalars(zip_eq(self.msg.iter().copied(), msg.iter().copied()));
         witness.assign_scalars(zip_eq(self.r_msg.iter().copied(), r_msg.iter().copied()));
+    }
 
-        let (instance, proof) = self.relation.prove(&witness)?;
-        let z = instance.point_val(self.z);
+    fn extract_presentation(
+        &self,
+        instance: &Instance,
+        v: RistrettoPoint,
+        r_v: RistrettoScalar,
+    ) -> Presentation<RistrettoPoint, Msg> {
         let commit_msg = instance
             .point_vals(self.commit_msg.iter().copied())
             .collect();
 
-        Ok(Presentation {
+        Presentation {
             commit_msg,
             u: self.u,
             // NOTE: r_v * H gets computed twice here since there is no notion of a secret point
             // variable in the system right now.
             commit_v: v + r_v * PublicParameters::<RistrettoPoint, Msg>::h(),
-            proof,
-        })
+        }
     }
 
-    fn verify(
+    fn assign_instance(
         &self,
+        instance: &mut Instance,
         key: &Key<RistrettoScalar, Msg>,
         presentation: &Presentation<RistrettoPoint, Msg>,
-    ) -> Result<(), PredicateError> {
+    ) {
         // Calculate Z = x_0 * U + \Sigma_i x_i * C_i - C_v
         let z = self.u.mul(key.0)
             + zip_eq(key.1.as_slice(), presentation.commit_msg.as_slice())
@@ -446,14 +450,11 @@ impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
                 .sum::<RistrettoPoint>()
             - presentation.commit_v;
 
-        let mut instance = Instance::default();
         instance.assign_point(self.z, z);
         instance.assign_points(zip_eq(
             self.commit_msg.0.clone(),
             presentation.commit_msg.0.clone(),
         ));
-
-        self.relation.verify(&instance, presentation.proof)
     }
 }
 
