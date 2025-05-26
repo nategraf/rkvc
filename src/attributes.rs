@@ -41,6 +41,10 @@ use core::{
 
 use curve25519_dalek::Scalar as RistrettoScalar;
 use hybrid_array::{sizes::U1, Array, ArraySize};
+use rand::{
+    distributions::{Distribution, Standard},
+    CryptoRng, Rng, RngCore,
+};
 use typenum::Unsigned;
 
 #[cfg(feature = "derive")]
@@ -294,8 +298,14 @@ impl<T: Clone> Encoder<&T> for IdentityEncoder<T> {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, PartialEq, Eq, Hash)]
 pub struct AttributeArray<T, A: AttributeCount + ?Sized>(pub Array<T, A::N>);
+
+impl<T: Clone, A: AttributeCount + ?Sized> Clone for AttributeArray<T, A> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
 
 impl<T, A: AttributeCount + ?Sized> Deref for AttributeArray<T, A> {
     type Target = Array<T, A::N>;
@@ -329,6 +339,22 @@ where
 {
     fn from(value: [T; N]) -> Self {
         Self(value.into())
+    }
+}
+
+impl<T, A> Distribution<AttributeArray<T, A>> for Standard
+where
+    A: AttributeCount + ?Sized,
+    Standard: Distribution<T>,
+{
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> AttributeArray<T, A> {
+        AttributeArray(Array::from_fn(|_| rng.gen()))
+    }
+}
+
+impl<A: AttributeCount + ?Sized> AttributeArray<RistrettoScalar, A> {
+    pub fn random(rng: &mut (impl RngCore + CryptoRng)) -> Self {
+        Self(Array::from_fn(|_| RistrettoScalar::random(rng)))
     }
 }
 

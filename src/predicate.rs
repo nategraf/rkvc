@@ -332,6 +332,8 @@ impl Instance {
     pub fn assign_point(&mut self, var: PointVar, point: RistrettoPoint) {
         if self.0.len() <= var.0 {
             self.0.resize(var.0 + 1, None);
+        } else if let Some(assignment) = self.0[var.0] {
+            assert_eq!(assignment, point, "conflicting assignments for var {var:?}")
         }
         self.0[var.0] = Some(point);
     }
@@ -346,7 +348,7 @@ impl Instance {
     }
 
     pub fn point_val(&self, var: PointVar) -> RistrettoPoint {
-        self.0[var.0].unwrap_or_else(|| panic!("unassigned point var with index {}", var.0))
+        self.0[var.0].unwrap_or_else(|| panic!("unassigned point var {var:?}"))
     }
 
     pub fn point_vals<I: IntoIterator<Item = PointVar>>(
@@ -363,6 +365,15 @@ impl Instance {
             PointTerm::Var(var, weight) => self.point_val(var) * (scalar * weight),
         }
     }
+
+    // NOTE: Not implemented as `IntoIterator` for now because doing so requires explicitly
+    // defining an iterator type, See https://github.com/rust-lang/rust/issues/63063
+    fn into_iter(self) -> impl Iterator<Item = (PointVar, RistrettoPoint)> {
+        self.0
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, x)| x.map(|x| (PointVar(i), x)))
+    }
 }
 
 #[derive(Default, Clone, Debug)]
@@ -370,10 +381,16 @@ pub(crate) struct Witness(Vec<Option<Scalar>>);
 
 impl Witness {
     pub fn assign_scalar(&mut self, var: ScalarVar, scalar: impl Into<Scalar>) {
+        let scalar = scalar.into();
         if self.0.len() <= var.0 {
             self.0.resize(var.0 + 1, None);
+        } else if let Some(assignment) = self.0[var.0] {
+            assert_eq!(
+                assignment, scalar,
+                "conflicting assignments for var {var:?}"
+            )
         }
-        self.0[var.0] = Some(scalar.into());
+        self.0[var.0] = Some(scalar);
     }
 
     pub fn assign_scalars(&mut self, assignments: impl IntoIterator<Item = (ScalarVar, Scalar)>) {
@@ -385,11 +402,17 @@ impl Witness {
     fn scalar_val(&self, var: impl Into<Option<ScalarVar>>) -> Scalar {
         // TODO: Should this be a panic, or an error?
         var.into()
-            .map(|var| {
-                self.0[var.0]
-                    .unwrap_or_else(|| panic!("unassigned scalar var with index {}", var.0))
-            })
+            .map(|var| self.0[var.0].unwrap_or_else(|| panic!("unassigned scalar var {var:?}")))
             .unwrap_or(Scalar::ONE)
+    }
+
+    // NOTE: Not implemented as `IntoIterator` for now because doing so requires explicitly
+    // defining an iterator type, See https://github.com/rust-lang/rust/issues/63063
+    fn into_iter(self) -> impl Iterator<Item = (ScalarVar, Scalar)> {
+        self.0
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, x)| x.map(|x| (ScalarVar(i), x)))
     }
 }
 

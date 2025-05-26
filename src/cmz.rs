@@ -1,6 +1,6 @@
 //! An implementaion of the µCMZ algerbraic MAC.
 
-use core::{convert::Infallible, marker::PhantomData, ops::Mul};
+use core::{marker::PhantomData, ops::Mul};
 
 use blake2::{Blake2b512, Digest};
 use curve25519_dalek::{
@@ -22,10 +22,7 @@ use crate::{
         Error as PredicateError, Instance, LinearCombination, PointVar, Relation, ScalarVar,
         Witness,
     },
-    zkp::{
-        AllocPointVar, AllocScalarVar, CompactProof as SchnorrProof, Constraint, Prover, SchnorrCS,
-        Transcript, Verifier,
-    },
+    zkp::{CompactProof as SchnorrProof, Prover, SchnorrCS, Transcript, Verifier},
 };
 
 // TODO: A weakness exists with the current design that needs to be mitigated with the addition of
@@ -60,6 +57,30 @@ where
     /// An array of Pedersen commitments to the attributes using the generators U and the basepoint
     /// of the group.
     pub commit_msg: AttributeArray<G, Msg>,
+}
+
+impl<Msg: AttributeCount> Presentation<RistrettoPoint, Msg> {
+    pub fn compress(&self) -> Presentation<CompressedRistretto, Msg> {
+        Presentation {
+            u: self.u.compress(),
+            commit_v: self.commit_v.compress(),
+            commit_msg: self.commit_msg.iter().map(|p| p.compress()).collect(),
+        }
+    }
+}
+
+impl<Msg: AttributeCount> Presentation<CompressedRistretto, Msg> {
+    pub fn decompress(&self) -> Option<Presentation<RistrettoPoint, Msg>> {
+        Some(Presentation {
+            u: self.u.decompress()?,
+            commit_v: self.commit_v.decompress()?,
+            commit_msg: self
+                .commit_msg
+                .iter()
+                .map(|p| p.decompress())
+                .collect::<Option<_>>()?,
+        })
+    }
 }
 
 #[non_exhaustive]
@@ -191,13 +212,15 @@ where
     where
         Msg: Attributes<IdentityEncoder<RistrettoScalar>>,
     {
-        let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
-        let mut verifier = Verifier::new(
-            b"rkvc::cmz::Mac::presentation::constraints",
-            &mut transcript,
-        );
-        self.constrain_presentation(&mut verifier, pres)?;
-        verifier.verify_compact(proof)?;
+        let pres = pres.decompress().ok_or(Error::DecompressFailed)?;
+        let mut relation = Relation::default();
+        let vars =
+            CmzPresentationRelation::constrain(&mut relation, pres.u, &self.public_parameters());
+        let instance = vars.create_presentation_instance(&self, &pres);
+        // TODO: Use a better error type.
+        relation
+            .verify(&instance, &proof)
+            .map_err(|_| Error::VerificationFailed)?;
         Ok(())
     }
 }
@@ -289,21 +312,18 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
         self.randomize(&mut rng);
 
         // Produce a ZKP attesting to the knowledge of an opening for the committed values.
-        // NOTE: Unwrap will never panic, prove_presentation is infallible.
-        let mut transcript = Transcript::new(b"rkvc::cmz::Mac::presentation::transcript");
-        let mut prover = Prover::new(
-            b"rkvc::cmz::Mac::presentation::constraints",
-            &mut transcript,
-        );
-        let (presentation, _) = self.prove_presentation_constraints(
-            &mut prover,
-            &msg.encode_attributes().collect(),
-            pp,
-            &mut rng,
-        );
-        let proof = prover.prove_compact();
+        let mut relation = Relation::default();
+        let vars = CmzPresentationRelation::constrain(&mut relation, self.u, pp);
+        let r_v = RistrettoScalar::random(&mut rng);
+        let witness = vars.create_witness(&CmzPresentationWitness {
+            msg: msg.encode_attributes().collect(),
+            r_v,
+            r_msg: AttributeArray::random(&mut rng),
+        });
+        let (instance, proof) = relation.prove(&witness).unwrap();
+        let presentation = vars.extract_presentation(&instance, self.v, r_v);
 
-        (presentation, proof)
+        (presentation.compress(), proof)
     }
 
     /// Adds the constraints for the presentation to an existing prover, in order to compose with
@@ -363,6 +383,47 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
     }
 }
 
+trait ConstraintSystem {
+    type Instance;
+
+    type Witness;
+
+    type Proof;
+
+    type Error;
+}
+
+struct SchnorrConstaintSystem;
+
+impl ConstraintSystem for SchnorrConstaintSystem {
+    type Instance = Instance;
+    type Witness = Witness;
+    type Proof = SchnorrProof;
+    type Error = PredicateError;
+}
+
+trait RelationTrait {
+    type CS: ConstraintSystem;
+
+    type Instance;
+
+    type Witness;
+
+    fn create_witness(&self, witness: &Self::Witness) -> <Self::CS as ConstraintSystem>::Witness;
+
+    fn create_instance(
+        &self,
+        instance: &Self::Instance,
+    ) -> <Self::CS as ConstraintSystem>::Instance;
+
+    fn extract_instance(
+        &self,
+        instance: &<Self::CS as ConstraintSystem>::Instance,
+    ) -> Result<Self::Instance, <Self::CS as ConstraintSystem>::Error>;
+}
+
+// Have a notion of a constraint system, which exposes an API to define contraints.
+
 struct CmzPresentationRelation<Msg: AttributeCount> {
     u: RistrettoPoint,
     z: PointVar,
@@ -370,6 +431,63 @@ struct CmzPresentationRelation<Msg: AttributeCount> {
     r_v: ScalarVar,
     r_msg: AttributeArray<ScalarVar, Msg>,
     msg: AttributeArray<ScalarVar, Msg>,
+}
+
+struct CmzPresentationInstance<Msg: AttributeCount> {
+    z: RistrettoPoint,
+    commit_msg: AttributeArray<RistrettoPoint, Msg>,
+}
+
+struct CmzPresentationWitness<Msg: AttributeCount> {
+    r_v: RistrettoScalar,
+    r_msg: AttributeArray<RistrettoScalar, Msg>,
+    msg: AttributeArray<RistrettoScalar, Msg>,
+}
+
+impl<Msg: AttributeCount> RelationTrait for CmzPresentationRelation<Msg> {
+    type CS = SchnorrConstaintSystem;
+
+    type Witness = CmzPresentationWitness<Msg>;
+    type Instance = CmzPresentationInstance<Msg>;
+
+    fn create_witness(&self, witness: &Self::Witness) -> <Self::CS as ConstraintSystem>::Witness {
+        let mut cs_witness = Witness::default();
+        cs_witness.assign_scalar(self.r_v, witness.r_v);
+        cs_witness.assign_scalars(zip_eq(
+            self.msg.iter().copied(),
+            witness.msg.iter().copied(),
+        ));
+        cs_witness.assign_scalars(zip_eq(
+            self.r_msg.iter().copied(),
+            witness.r_msg.iter().copied(),
+        ));
+        cs_witness
+    }
+
+    fn create_instance(
+        &self,
+        instance: &Self::Instance,
+    ) -> <Self::CS as ConstraintSystem>::Instance {
+        let mut cs_instance = Instance::default();
+        cs_instance.assign_point(self.z, instance.z);
+        cs_instance.assign_points(zip_eq(
+            self.commit_msg.0.clone(),
+            instance.commit_msg.0.clone(),
+        ));
+        cs_instance
+    }
+
+    fn extract_instance(
+        &self,
+        cs_instance: &<Self::CS as ConstraintSystem>::Instance,
+    ) -> Result<Self::Instance, <Self::CS as ConstraintSystem>::Error> {
+        Ok(Self::Instance {
+            z: cs_instance.point_val(self.z),
+            commit_msg: cs_instance
+                .point_vals(self.commit_msg.iter().copied())
+                .collect(),
+        })
+    }
 }
 
 impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
@@ -406,25 +524,13 @@ impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
         }
     }
 
-    fn assign_witness(
-        &self,
-        witness: &mut Witness,
-        msg: AttributeArray<RistrettoScalar, Msg>,
-        r_v: RistrettoScalar,
-        r_msg: AttributeArray<RistrettoScalar, Msg>,
-    ) {
-        witness.assign_scalar(self.r_v, r_v);
-        witness.assign_scalars(zip_eq(self.msg.iter().copied(), msg.iter().copied()));
-        witness.assign_scalars(zip_eq(self.r_msg.iter().copied(), r_msg.iter().copied()));
-    }
-
     fn extract_presentation(
         &self,
-        instance: &Instance,
+        cs_instance: &Instance,
         v: RistrettoPoint,
         r_v: RistrettoScalar,
     ) -> Presentation<RistrettoPoint, Msg> {
-        let commit_msg = instance
+        let commit_msg = cs_instance
             .point_vals(self.commit_msg.iter().copied())
             .collect();
 
@@ -437,12 +543,11 @@ impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
         }
     }
 
-    fn assign_instance(
+    fn create_presentation_instance(
         &self,
-        instance: &mut Instance,
         key: &Key<RistrettoScalar, Msg>,
         presentation: &Presentation<RistrettoPoint, Msg>,
-    ) {
+    ) -> Instance {
         // Calculate Z = x_0 * U + \Sigma_i x_i * C_i - C_v
         let z = self.u.mul(key.0)
             + zip_eq(key.1.as_slice(), presentation.commit_msg.as_slice())
@@ -450,11 +555,10 @@ impl<Msg: AttributeCount> CmzPresentationRelation<Msg> {
                 .sum::<RistrettoPoint>()
             - presentation.commit_v;
 
-        instance.assign_point(self.z, z);
-        instance.assign_points(zip_eq(
-            self.commit_msg.0.clone(),
-            presentation.commit_msg.0.clone(),
-        ));
+        self.create_instance(&CmzPresentationInstance {
+            z,
+            commit_msg: presentation.commit_msg.clone(),
+        })
     }
 }
 
