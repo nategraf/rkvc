@@ -249,7 +249,7 @@ where
             - pres.commit_v;
 
         let mut instance = Instance::default();
-        statement.assign_instance(
+        CmzPresentationStatement::assign_instance(
             &vars,
             &mut instance,
             &CmzPresentationInstance {
@@ -361,7 +361,7 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
         let vars = statement.constrain(&mut relation);
         let r_v = RistrettoScalar::random(&mut rng);
         let mut witness = Witness::default();
-        statement.assign_witness(
+        CmzPresentationStatement::assign_witness(
             &vars,
             &mut witness,
             &CmzPresentationWitness {
@@ -371,7 +371,7 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
             },
         );
         let (instance, proof) = relation.prove(&witness).unwrap();
-        let cmz_instance = statement.extract_instance(&vars, &instance).unwrap();
+        let cmz_instance = CmzPresentationStatement::extract_instance(&vars, &instance).unwrap();
 
         let presentation = Presentation {
             commit_msg: cmz_instance.commit_msg,
@@ -409,17 +409,15 @@ trait Statement<CS: ConstraintSystem> {
 
     fn constrain(&self, cs: &mut CS::Relation) -> Self::Vars;
 
-    fn assign_witness(&self, vars: &Self::Vars, cs: &mut CS::Witness, witness: &Self::Witness);
+    fn assign_witness(vars: &Self::Vars, cs: &mut CS::Witness, witness: &Self::Witness);
 
     fn assign_instance(
-        &self,
         vars: &Self::Vars,
         cs_instance: &mut CS::Instance,
         instance: &Self::Instance,
     );
 
     fn extract_instance(
-        &self,
         vars: &Self::Vars,
         instance: &CS::Instance,
     ) -> Result<Self::Instance, CS::Error>;
@@ -484,7 +482,7 @@ impl<Msg: AttributeCount> Statement<SchnorrConstaintSystem> for CmzPresentationS
         }
     }
 
-    fn assign_witness(&self, vars: &Self::Vars, cs_witness: &mut Witness, witness: &Self::Witness) {
+    fn assign_witness(vars: &Self::Vars, cs_witness: &mut Witness, witness: &Self::Witness) {
         cs_witness.assign_scalar(vars.r_v, witness.r_v);
         cs_witness.assign_scalars(zip_eq(
             vars.msg.iter().copied(),
@@ -496,12 +494,7 @@ impl<Msg: AttributeCount> Statement<SchnorrConstaintSystem> for CmzPresentationS
         ));
     }
 
-    fn assign_instance(
-        &self,
-        vars: &Self::Vars,
-        cs_instance: &mut Instance,
-        instance: &Self::Instance,
-    ) {
+    fn assign_instance(vars: &Self::Vars, cs_instance: &mut Instance, instance: &Self::Instance) {
         cs_instance.assign_point(vars.z, instance.z);
         cs_instance.assign_points(zip_eq(
             vars.commit_msg.0.clone(),
@@ -510,7 +503,6 @@ impl<Msg: AttributeCount> Statement<SchnorrConstaintSystem> for CmzPresentationS
     }
 
     fn extract_instance(
-        &self,
         vars: &Self::Vars,
         cs_instance: &Instance,
     ) -> Result<Self::Instance, PredicateError> {
