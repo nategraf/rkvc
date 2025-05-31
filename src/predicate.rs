@@ -23,16 +23,16 @@ mod ops;
 // https://docs.rs/ghost-cell/latest/src/ghost_cell/ghost_cell.rs.html#533
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct ScalarVar(usize);
+pub struct ScalarVar(usize);
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct PointVar(usize);
+pub struct PointVar(usize);
 
 /// A group element part of a [Term], which can either be a constant in the relation (e.g. a
 /// basepoint for a commitment) or a variable that is part of the instance definition (e.g. a
 /// public key for a signature).
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum PointTerm {
+pub enum PointTerm {
     /// An instance variable, as an identifier and a constant scalar weight.
     Var(PointVar, Scalar),
     /// A constant point in the relation.
@@ -52,7 +52,7 @@ impl From<PointVar> for PointTerm {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct Term {
+pub struct Term {
     /// A scalar in the linear combination that is part of the witness (i.e. it is secret to the
     /// prover). If `None`, this indicates that the term does not have an associated secret and
     /// this term only a public point.
@@ -64,7 +64,7 @@ pub(crate) struct Term {
 /// A linear combination of scalar variables (private the prover) and point variables (known to
 /// both parties). If the scalar variable is `None`, it is equivalent to the known constant 1.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct LinearCombination(Vec<Term>);
+pub struct LinearCombination(Vec<Term>);
 
 impl From<RistrettoPoint> for Term {
     fn from(value: RistrettoPoint) -> Self {
@@ -118,7 +118,7 @@ impl From<PointVar> for LinearCombination {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Relation {
+pub struct Relation {
     scalar_var_count: usize,
     point_var_count: usize,
     constraints: Vec<LinearCombination>,
@@ -170,6 +170,13 @@ impl Relation {
         // Constraint the newly allocated point to be equal to the linear combination.
         self.constrain_eq(point_var, linear_combination);
         point_var
+    }
+
+    pub fn alloc<S: Statement<SchnorrConstaintSystem> + ?Sized>(
+        &mut self,
+        statement: &S,
+    ) -> S::Vars {
+        statement.constrain(self)
     }
 
     pub fn compute_instance(&self, witness: &Witness) -> Result<Instance, Error> {
@@ -326,9 +333,17 @@ impl Relation {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Instance(Vec<Option<RistrettoPoint>>);
+pub struct Instance(Vec<Option<RistrettoPoint>>);
 
 impl Instance {
+    pub fn assign<S: Statement<SchnorrConstaintSystem> + ?Sized>(
+        &mut self,
+        vars: &S::Vars,
+        inst: &S::Instance,
+    ) {
+        S::assign_instance(self, vars, inst)
+    }
+
     pub fn assign_point(&mut self, var: PointVar, point: RistrettoPoint) {
         if self.0.len() <= var.0 {
             self.0.resize(var.0 + 1, None);
@@ -358,6 +373,13 @@ impl Instance {
         vars.into_iter().map(|var| self.point_val(var))
     }
 
+    pub fn extract<S: Statement<SchnorrConstaintSystem> + ?Sized>(
+        &self,
+        vars: &S::Vars,
+    ) -> Result<S::Instance, Error> {
+        S::extract_instance(vars, self)
+    }
+
     fn eval_term(&self, term: &Term, witness: &Witness) -> RistrettoPoint {
         let scalar = witness.scalar_val(term.scalar);
         match term.point {
@@ -376,10 +398,85 @@ impl Instance {
     }
 }
 
+pub trait ConstraintSystem {
+    type Relation;
+    type Instance;
+    type Witness;
+    type Proof;
+    type Error;
+}
+
+pub struct SchnorrConstaintSystem;
+
+impl ConstraintSystem for SchnorrConstaintSystem {
+    type Relation = Relation;
+    type Instance = Instance;
+    type Witness = Witness;
+    type Proof = CompactProof;
+    type Error = Error;
+}
+
+pub trait Statement<CS: ConstraintSystem> {
+    type Vars;
+    type Instance;
+    type Witness;
+
+    fn constrain(&self, cs: &mut CS::Relation) -> Self::Vars;
+
+    fn assign_witness(cs: &mut CS::Witness, vars: &Self::Vars, witness: &Self::Witness);
+
+    fn assign_instance(
+        cs_instance: &mut CS::Instance,
+        vars: &Self::Vars,
+        instance: &Self::Instance,
+    );
+
+    fn extract_instance(
+        vars: &Self::Vars,
+        instance: &CS::Instance,
+    ) -> Result<Self::Instance, CS::Error>;
+}
+
+pub trait Prove: Statement<SchnorrConstaintSystem> {
+    fn prove(&self, witness: &Self::Witness) -> Result<(Self::Instance, CompactProof), Error> {
+        let mut relation = Relation::default();
+        let vars = relation.alloc(self);
+
+        let mut relation_witness = Witness::default();
+        // TODO: Figure out how to enable type inference here.
+        relation_witness.assign::<Self>(&vars, witness);
+
+        let (relation_instance, proof) = relation.prove(&relation_witness)?;
+
+        let instance = relation_instance.extract::<Self>(&vars)?;
+        Ok((instance, proof))
+    }
+}
+
+pub trait Verify: Statement<SchnorrConstaintSystem> {
+    fn verify(&self, instance: &Self::Instance, proof: &CompactProof) -> Result<(), Error> {
+        let mut relation = Relation::default();
+        let vars = relation.alloc(self);
+
+        let mut relation_instance = Instance::default();
+        // TODO: Figure out how to enable type inference here.
+        relation_instance.assign::<Self>(&vars, instance);
+        relation.verify(&relation_instance, proof)
+    }
+}
+
 #[derive(Default, Clone, Debug)]
-pub(crate) struct Witness(Vec<Option<Scalar>>);
+pub struct Witness(Vec<Option<Scalar>>);
 
 impl Witness {
+    pub fn assign<S: Statement<SchnorrConstaintSystem> + ?Sized>(
+        &mut self,
+        vars: &S::Vars,
+        wit: &S::Witness,
+    ) {
+        S::assign_witness(self, vars, wit)
+    }
+
     pub fn assign_scalar(&mut self, var: ScalarVar, scalar: impl Into<Scalar>) {
         let scalar = scalar.into();
         if self.0.len() <= var.0 {
@@ -427,7 +524,7 @@ impl FromIterator<(ScalarVar, Scalar)> for Witness {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("point variable with index {index} is unassigned")]
     UnassignedPoint { index: usize },
     #[error("witness length of {received} does not match the expected length for the relation, {expected}")]

@@ -18,8 +18,8 @@ use crate::{
     attributes::{AttributeArray, AttributeCount, Attributes, IdentityEncoder, UintEncoder},
     pedersen::{PedersenCommitment, PedersenGenerators},
     predicate::{
-        Error as PredicateError, Instance, LinearCombination, PointVar, Relation, ScalarVar,
-        Witness,
+        Error as PredicateError, Instance, LinearCombination, PointVar, Prove, Relation, ScalarVar,
+        SchnorrConstaintSystem, Statement, Verify, Witness,
     },
     zkp::CompactProof as SchnorrProof,
 };
@@ -236,8 +236,6 @@ where
             u: pres.u,
             pp: self.public_parameters(),
         };
-        let mut relation = Relation::default();
-        let vars = statement.constrain(&mut relation);
 
         // Calculate Z = x_0 * U + \Sigma_i x_i * C_i - C_v
         // NOTE: This is computed here because the verifier and prover use different methods to
@@ -248,21 +246,15 @@ where
                 .sum::<RistrettoPoint>()
             - pres.commit_v;
 
-        let mut instance = Instance::default();
-        CmzPresentationStatement::assign_instance(
-            &vars,
-            &mut instance,
-            &CmzPresentationInstance {
-                z,
-                commit_msg: pres.commit_msg.clone(),
-            },
-        );
+        let instance = CmzPresentationInstance {
+            z,
+            commit_msg: pres.commit_msg.clone(),
+        };
 
         // TODO: Use a better error type.
-        relation
+        statement
             .verify(&instance, proof)
-            .map_err(|_| Error::VerificationFailed)?;
-        Ok(())
+            .map_err(|_| Error::VerificationFailed)
     }
 }
 
@@ -357,73 +349,25 @@ impl<Msg> Mac<RistrettoPoint, Msg> {
             u: self.u,
             pp: pp.clone(),
         };
-        let mut relation = Relation::default();
-        let vars = statement.constrain(&mut relation);
-        let r_v = RistrettoScalar::random(&mut rng);
-        let mut witness = Witness::default();
-        CmzPresentationStatement::assign_witness(
-            &vars,
-            &mut witness,
-            &CmzPresentationWitness {
-                msg: msg.encode_attributes().collect(),
-                r_v,
-                r_msg: AttributeArray::random(&mut rng),
-            },
-        );
-        let (instance, proof) = relation.prove(&witness).unwrap();
-        let cmz_instance = CmzPresentationStatement::extract_instance(&vars, &instance).unwrap();
+
+        let witness = CmzPresentationWitness {
+            msg: msg.encode_attributes().collect(),
+            r_v: RistrettoScalar::random(&mut rng),
+            r_msg: AttributeArray::random(&mut rng),
+        };
+
+        let (instance, proof) = statement.prove(&witness).unwrap();
 
         let presentation = Presentation {
-            commit_msg: cmz_instance.commit_msg,
+            commit_msg: instance.commit_msg,
             u: self.u,
             // NOTE: r_v * H gets computed twice here since there is no notion of a secret point
             // variable in the system right now.
-            commit_v: self.v + r_v * PublicParameters::<RistrettoPoint, Msg>::h(),
+            commit_v: self.v + witness.r_v * PublicParameters::<RistrettoPoint, Msg>::h(),
         };
         (presentation.compress(), proof)
     }
 }
-
-trait ConstraintSystem {
-    type Relation;
-    type Instance;
-    type Witness;
-    type Proof;
-    type Error;
-}
-
-struct SchnorrConstaintSystem;
-
-impl ConstraintSystem for SchnorrConstaintSystem {
-    type Relation = Relation;
-    type Instance = Instance;
-    type Witness = Witness;
-    type Proof = SchnorrProof;
-    type Error = PredicateError;
-}
-
-trait Statement<CS: ConstraintSystem> {
-    type Vars;
-    type Instance;
-    type Witness;
-
-    fn constrain(&self, cs: &mut CS::Relation) -> Self::Vars;
-
-    fn assign_witness(vars: &Self::Vars, cs: &mut CS::Witness, witness: &Self::Witness);
-
-    fn assign_instance(
-        vars: &Self::Vars,
-        cs_instance: &mut CS::Instance,
-        instance: &Self::Instance,
-    );
-
-    fn extract_instance(
-        vars: &Self::Vars,
-        instance: &CS::Instance,
-    ) -> Result<Self::Instance, CS::Error>;
-}
-
-// Have a notion of a constraint system, which exposes an API to define contraints.
 
 struct CmzPresentationStatement<Msg: AttributeCount> {
     u: RistrettoPoint,
@@ -482,7 +426,7 @@ impl<Msg: AttributeCount> Statement<SchnorrConstaintSystem> for CmzPresentationS
         }
     }
 
-    fn assign_witness(vars: &Self::Vars, cs_witness: &mut Witness, witness: &Self::Witness) {
+    fn assign_witness(cs_witness: &mut Witness, vars: &Self::Vars, witness: &Self::Witness) {
         cs_witness.assign_scalar(vars.r_v, witness.r_v);
         cs_witness.assign_scalars(zip_eq(
             vars.msg.iter().copied(),
@@ -494,7 +438,7 @@ impl<Msg: AttributeCount> Statement<SchnorrConstaintSystem> for CmzPresentationS
         ));
     }
 
-    fn assign_instance(vars: &Self::Vars, cs_instance: &mut Instance, instance: &Self::Instance) {
+    fn assign_instance(cs_instance: &mut Instance, vars: &Self::Vars, instance: &Self::Instance) {
         cs_instance.assign_point(vars.z, instance.z);
         cs_instance.assign_points(zip_eq(
             vars.commit_msg.0.clone(),
@@ -514,6 +458,10 @@ impl<Msg: AttributeCount> Statement<SchnorrConstaintSystem> for CmzPresentationS
         })
     }
 }
+
+impl<Msg: AttributeCount> Prove for CmzPresentationStatement<Msg> {}
+
+impl<Msg: AttributeCount> Verify for CmzPresentationStatement<Msg> {}
 
 #[cfg(test)]
 mod test {
