@@ -324,10 +324,11 @@ impl Relation {
         verifier.verify_compact(proof).map_err(Error::Verification)
     }
 
+    // NOTE: This is starting to feel hacky
     fn is_term_assigned(&self, instance: &Instance, term: &Term) -> bool {
         match term.point {
             PointTerm::Const(_) => true,
-            PointTerm::Var(var, _) => instance.0[var.0].is_some(),
+            PointTerm::Var(var, _) => instance.0.get(var.0).unwrap_or(&None).is_some(),
         }
     }
 }
