@@ -19,6 +19,7 @@ pub mod cmz;
 pub mod hash;
 pub mod pedersen;
 mod predicate;
+mod predicate2;
 pub mod range;
 pub mod zkp;
 
